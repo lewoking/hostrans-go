@@ -114,6 +114,13 @@ func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
 	return true
 }
 
+func (m *Monitor) resetLock() {
+	m.mu.Lock()
+	m.buffers = nil
+	m.lastMine = ""
+	m.mu.Unlock()
+}
+
 func (m *Monitor) proc() *memory.Process {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -342,13 +349,19 @@ func (m *Monitor) TranslateInput(log func(string)) {
 	}()
 	src, err := memory.CaptureChatInput(p.PID)
 	if err != nil {
-		if log != nil {
-			log("读取输入框失败: " + err.Error())
-		}
-		return
+		src = ""
 	}
 	src = trimChat(src)
-	if src == "" {
+	// 输入框空/没有中文：当作初始化（原 Ctrl+1）
+	if src == "" || !memory.ContainsHan(src) {
+		if log != nil {
+			log("输入框无可译中文，开始初始化…")
+		}
+		if err := m.Locate(log); err != nil {
+			if log != nil {
+				log(err.Error())
+			}
+		}
 		return
 	}
 	dst, err := m.Trans.Translate(src, "zh", "ko")

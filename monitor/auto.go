@@ -147,80 +147,108 @@ func sleepStop(d time.Duration, stop <-chan struct{}) bool {
 	}
 }
 
-// AutoInit 启动后自动找聊天缓冲；选人↔局内切换导致地址失效时会再定位。
-func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
-	passiveFail := 0
-	for {
+func (m *Monitor) initAfterLobby(stop <-chan struct{}, sink Sink) bool {
+	if sink != nil {
+		sink.Status("检测到对局，即将初始化")
+		sink.Stay()
+	}
+	if !sleepStop(2*time.Second, stop) {
+		return false
+	}
+	m.resetLock()
+
+	for i := 0; i < 8; i++ {
 		if err := m.AttachIfNeeded(); err != nil {
 			if sink != nil {
-				sink.Status("等待游戏启动…")
+				sink.Status("等待游戏进程…")
 				sink.Stay()
 			}
-			if !sleepStop(3*time.Second, stop) {
-				return
+			if !sleepStop(2*time.Second, stop) {
+				return false
 			}
 			continue
 		}
-
-		live := m.pruneDead()
-		if live == 0 {
+		if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
 			if sink != nil {
-				sink.Status("自动定位选人/局内聊天…")
-				sink.Stay()
+				sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
+				sink.Show()
 			}
-			if err := m.LocatePassive(nil); err != nil {
-				passiveFail++
-				if passiveFail >= 2 && m.windowReady() {
-					m.mu.Lock()
-					tooSoon := !m.lastProbe.IsZero() && time.Since(m.lastProbe) < 45*time.Second
-					m.mu.Unlock()
-					if tooSoon {
-						if sink != nil {
-							sink.Status("等待能打字的界面（选人/局内）")
-							sink.Stay()
-						}
-					} else {
-						if sink != nil {
-							sink.Status("当前界面发探测串以锁定聊天")
-							sink.Stay()
-						}
-						err := m.Locate(func(s string) {
-							if sink != nil {
-								sink.Status(s)
-								sink.Stay()
-							}
-						})
-						m.mu.Lock()
-						m.lastProbe = time.Now()
-						m.mu.Unlock()
-						if err != nil {
-							if sink != nil {
-								sink.Status("等能打字后再试（选人或局内）")
-								sink.Stay()
-							}
-						} else if sink != nil {
-							sink.Status(fmt.Sprintf("已监听当前场景（%d 处），换场景会自动跟", m.BufferCount()))
-							sink.Show()
-						}
-					}
-					passiveFail = 0
-				}
-			} else {
-				passiveFail = 0
+			return true
+		}
+		// 加载画面往往还不能打字；多试几次被动扫描后再发探测串
+		if i >= 3 && m.windowReady() {
+			m.mu.Lock()
+			tooSoon := !m.lastProbe.IsZero() && time.Since(m.lastProbe) < 45*time.Second
+			m.mu.Unlock()
+			if !tooSoon {
 				if sink != nil {
-					sink.Status(fmt.Sprintf("已自动监听 %d 处聊天缓冲", m.BufferCount()))
-					sink.Show()
+					sink.Status("正在锁定当前界面聊天…")
+					sink.Stay()
+				}
+				err := m.Locate(func(s string) {
+					if sink != nil {
+						sink.Status(s)
+						sink.Stay()
+					}
+				})
+				m.mu.Lock()
+				m.lastProbe = time.Now()
+				m.mu.Unlock()
+				if err == nil && m.BufferCount() > 0 {
+					if sink != nil {
+						sink.Status("初始化完成，开始监控")
+						sink.Show()
+					}
+					return true
 				}
 			}
-			if !sleepStop(3*time.Second, stop) {
+		}
+		if sink != nil {
+			sink.Status("检测到对局，即将初始化…")
+			sink.Stay()
+		}
+		if !sleepStop(2*time.Second, stop) {
+			return false
+		}
+	}
+	if sink != nil {
+		sink.Status("自动初始化未成功，空聊天框按 Ctrl+P")
+		sink.Stay()
+	}
+	return true
+}
+
+// AutoInit 借鉴 HotsStats：轮询 battlelobby 文件。
+// 加载画面写出 replay.server.battlelobby 即视为新对局，提示后自动初始化。
+func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
+	var lastMod time.Time
+	for {
+		_ = m.AttachIfNeeded()
+		m.pruneDead()
+
+		mt, ok := battleLobbyModTime()
+		if !ok {
+			lastMod = time.Time{}
+		} else if !mt.Equal(lastMod) {
+			lastMod = mt
+			if !m.initAfterLobby(stop, sink) {
 				return
 			}
 			continue
 		}
 
-		passiveFail = 0
-		_ = m.LocatePassive(nil)
-		if !sleepStop(20*time.Second, stop) {
+		if m.BufferCount() == 0 {
+			if sink != nil {
+				if ok {
+					sink.Status("对局进行中，空聊天框按 Ctrl+P 初始化")
+				} else {
+					sink.Status("等待进入对局…")
+				}
+				sink.Stay()
+			}
+		}
+
+		if !sleepStop(time.Second, stop) {
 			return
 		}
 	}

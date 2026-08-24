@@ -47,7 +47,6 @@ const (
 	modNoRepeat = 0x4000
 	vkTab       = 0x09
 	vkP         = 0x50
-	vk1         = 0x31
 
 	dtLeft      = 0x0000
 	dtWordBreak = 0x0010
@@ -59,7 +58,6 @@ const (
 	idcArrow    = 32512
 	colorWindow = 5
 
-	hotLocate  = 1
 	hotShow    = 2
 	hotTransIn = 3
 
@@ -291,12 +289,11 @@ func (o *Overlay) Run() error {
 	)
 
 	modFlags := uintptr(modControl | modNoRepeat)
-	procRegisterHotKey.Call(hwnd, hotLocate, modFlags, vk1)
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
 
-	o.Status("自动定位选人 / 局内聊天")
-	o.Status("Ctrl+P 中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
+	o.Status("等待进入对局…")
+	o.Status("Ctrl+P 中译韩 / 空框则初始化  ·  Ctrl+Tab 显示")
 	o.armHide()
 
 	var m msg
@@ -309,7 +306,6 @@ func (o *Overlay) Run() error {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
-	procUnregisterHotKey.Call(hwnd, hotLocate)
 	procUnregisterHotKey.Call(hwnd, hotShow)
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
 	if o.font != 0 {
@@ -346,10 +342,6 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 			break
 		}
 		switch wParam {
-		case hotLocate:
-			if o.OnLocate != nil {
-				go o.OnLocate()
-			}
 		case hotShow:
 			o.Show()
 		case hotTransIn:
@@ -463,5 +455,5 @@ func (o *Overlay) paint(hwnd uintptr) {
 		h := draw(14, y, winW-28, 80, col, s)
 		y += h + 6
 	}
-	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+P 中译韩  Ctrl+Tab 显示")
+	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+P 译韩/空则初始化")
 }

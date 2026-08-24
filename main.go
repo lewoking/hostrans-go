@@ -31,24 +31,14 @@ func main() {
 		fmt.Println("未取得管理员权限，内存读取可能失败。")
 	}
 
-	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
+	fmt.Println("窗口化最大化  ·  检测到对局后自动初始化  ·  Ctrl+P 中译韩（空框则初始化）")
 
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())
 	ov := ui.NewOverlay()
 
-	ov.OnLocate = func() {
-		ov.Status("强制重定位当前界面…")
-		ov.Stay()
-		if err := mon.Locate(ov.Status); err != nil {
-			ov.Status(err.Error())
-			ov.Stay()
-			return
-		}
-		ov.Status("已监听当前场景")
-		ov.Show()
-	}
 	ov.OnTranslateInput = func() {
+		ov.Stay()
 		mon.TranslateInput(ov.Status)
 		ov.Show()
 	}
