@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"runtime"
 	"time"
 
@@ -13,13 +14,24 @@ import (
 )
 
 func main() {
+	if runtime.GOOS == "windows" {
+		memory.ElevateIfNeeded()
+		if err := memory.EnsureSingleInstance(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
+
 	fmt.Println("HOSTrans  |  无 Key  ·  选人/局内自动翻译")
 	if runtime.GOOS != "windows" {
 		fmt.Println("请在 Windows 上运行交叉编译出的 hostrans.exe")
 		return
 	}
+	if !memory.IsAdmin() {
+		fmt.Println("未取得管理员权限，内存读取可能失败。")
+	}
 
-	fmt.Println("管理员 + 窗口化最大化  ·  Ctrl+P 中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位  ·  × 退出")
+	fmt.Println("窗口化最大化  ·  Ctrl+P 译出  ·  Ctrl+L 韩/英  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
 
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())
@@ -40,8 +52,14 @@ func main() {
 		mon.TranslateInput(ov.Status)
 		ov.Show()
 	}
+	ov.OnSwitchLang = func() {
+		name := mon.ToggleOutLang()
+		ov.Status("译出语言: 中 → " + name)
+		ov.Show()
+	}
 
 	stop := make(chan struct{})
+	go mon.RunTranslator(stop, ov)
 	go mon.AutoInit(stop, ov)
 	go mon.Loop(800*time.Millisecond, ov, stop)
 	_ = ov.Run()

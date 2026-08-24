@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Translator 接口
@@ -29,21 +31,54 @@ func NewMicrosoftTranslator() *MicrosoftTranslator {
 
 func (m *MicrosoftTranslator) Name() string { return "Microsoft" }
 
+var (
+	edgeMu    sync.Mutex
+	edgeToken string
+	edgeUntil time.Time
+)
+
+func fetchEdgeToken(client *http.Client) string {
+	edgeMu.Lock()
+	defer edgeMu.Unlock()
+	if edgeToken != "" && time.Now().Before(edgeUntil) {
+		return edgeToken
+	}
+	req, err := http.NewRequest("GET", "https://edge.microsoft.com/translate/auth", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	tok := strings.TrimSpace(string(data))
+	if tok == "" || resp.StatusCode != 200 {
+		return ""
+	}
+	edgeToken = tok
+	edgeUntil = time.Now().Add(8 * time.Minute)
+	return tok
+}
+
 func (m *MicrosoftTranslator) Translate(text, from, to string) (string, error) {
-	// 微软免费公共接口（edge 风格）
-	// 实际生产中常用的是通过 edge 的翻译 token 接口，这里先用简化可用版本
-	apiURL := "https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to=" + to
+	apiURL := "https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to=" + url.QueryEscape(to)
 	if from != "" && from != "auto" {
-		apiURL += "&from=" + from
+		apiURL += "&from=" + url.QueryEscape(from)
 	}
 
-	body := fmt.Sprintf(`[{"Text":%q}]`, text)
-	req, err := http.NewRequest("POST", apiURL, strings.NewReader(body))
+	payload, _ := json.Marshal([]map[string]string{{"Text": text}})
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(string(payload)))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	if tok := fetchEdgeToken(m.client); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -203,6 +238,9 @@ func langMap(lang string) string {
 // ==================== 多引擎自动回退（开箱即用） ====================
 type Manager struct {
 	engines []Translator
+	mu      sync.Mutex
+	cache   map[string]string
+	order   []string
 }
 
 func NewManager() *Manager {
@@ -212,18 +250,50 @@ func NewManager() *Manager {
 			NewDeepLXTranslator(""),
 			NewYoudaoTranslator(),
 		},
+		cache: make(map[string]string),
 	}
 }
 
-// Translate 自动尝试所有无 Key 引擎，成功即返回
+func cacheKey(text, from, to string) string {
+	return from + "\x00" + to + "\x00" + text
+}
+
+func clipRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:max])
+}
+
+// Translate 自动尝试所有无 Key 引擎，成功即返回（带短缓存，避免同一句反复打接口）。
 func (m *Manager) Translate(text, from, to string) (string, error) {
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", nil
 	}
+	text = clipRunes(text, 240)
+	key := cacheKey(text, from, to)
+	m.mu.Lock()
+	if v, ok := m.cache[key]; ok {
+		m.mu.Unlock()
+		return v, nil
+	}
+	m.mu.Unlock()
+
 	var lastErr error
 	for _, eng := range m.engines {
 		result, err := eng.Translate(text, from, to)
 		if err == nil && result != "" {
+			m.mu.Lock()
+			if len(m.order) >= 400 {
+				old := m.order[0]
+				m.order = m.order[1:]
+				delete(m.cache, old)
+			}
+			m.cache[key] = result
+			m.order = append(m.order, key)
+			m.mu.Unlock()
 			return result, nil
 		}
 		lastErr = fmt.Errorf("%s: %v", eng.Name(), err)

@@ -16,6 +16,8 @@ func CaptureChatInput(pid uint32) (string, error) { return "", fmt.Errorf("not s
 
 func PasteToGame(pid uint32, text string) error { return fmt.Errorf("not supported") }
 
+func TranslateChatBox(pid uint32, translated string) error { return fmt.Errorf("not supported") }
+
 func SetClipboardText(s string) error { return fmt.Errorf("not supported") }
 
 func GetClipboardText() (string, error) { return "", fmt.Errorf("not supported") }

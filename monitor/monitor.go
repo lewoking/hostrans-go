@@ -25,16 +25,24 @@ type buffer struct {
 	fail int
 }
 
+type translateJob struct {
+	speaker string
+	body    string
+}
+
 type Monitor struct {
 	Trans *translator.Manager
 
-	mu       sync.Mutex
-	Proc     *memory.Process
-	buffers  []buffer
-	probes   map[string]struct{}
-	lastMine string
-	seen     *seenSet
-	locating int32
+	mu        sync.Mutex
+	Proc      *memory.Process
+	buffers   []buffer
+	probes    map[string]struct{}
+	lastMine  string
+	outLang   string
+	lastProbe time.Time
+	seen      *seenSet
+	locating  int32
+	jobs      chan translateJob
 }
 
 type seenSet struct {
@@ -65,10 +73,32 @@ func (s *seenSet) Add(x string) bool {
 
 func New(trans *translator.Manager) *Monitor {
 	return &Monitor{
-		Trans:  trans,
-		probes: make(map[string]struct{}),
-		seen:   newSeen(),
+		Trans:   trans,
+		probes:  make(map[string]struct{}),
+		seen:    newSeen(),
+		outLang: "ko",
+		jobs:    make(chan translateJob, 24),
 	}
+}
+
+func (m *Monitor) OutLangName() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.outLang == "en" {
+		return "英语"
+	}
+	return "韩语"
+}
+
+func (m *Monitor) ToggleOutLang() string {
+	m.mu.Lock()
+	if m.outLang == "en" {
+		m.outLang = "ko"
+	} else {
+		m.outLang = "en"
+	}
+	m.mu.Unlock()
+	return m.OutLangName()
 }
 
 func (m *Monitor) Ready() bool {
@@ -270,13 +300,29 @@ func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Si
 	if !memory.NeedsTranslate(body) {
 		return
 	}
-	zh, err := m.Trans.Translate(body, "auto", "zh")
-	if err != nil || zh == "" || looksLikeFailure(zh) {
-		return
+	job := translateJob{speaker: memory.DisplaySpeaker(line), body: body}
+	select {
+	case m.jobs <- job:
+	default:
 	}
-	if sink != nil {
-		sink.Push(memory.DisplaySpeaker(line), zh)
-		sink.Show()
+}
+
+// RunTranslator 独立协程翻译，避免 HTTP 堵住 0.8s 内存轮询。
+func (m *Monitor) RunTranslator(stop <-chan struct{}, sink Sink) {
+	for {
+		select {
+		case <-stop:
+			return
+		case job := <-m.jobs:
+			zh, err := m.Trans.Translate(job.body, "auto", "zh")
+			if err != nil || zh == "" || looksLikeFailure(zh) {
+				continue
+			}
+			if sink != nil {
+				sink.Push(job.speaker, zh)
+				sink.Show()
+			}
+		}
 	}
 }
 
@@ -310,6 +356,12 @@ func (m *Monitor) TranslateInput(log func(string)) {
 		}
 		return
 	}
+	oldClip, clipErr := memory.GetClipboardText()
+	defer func() {
+		if clipErr == nil {
+			_ = memory.SetClipboardText(oldClip)
+		}
+	}()
 	src, err := memory.CaptureChatInput(p.PID)
 	if err != nil {
 		if log != nil {
@@ -321,24 +373,34 @@ func (m *Monitor) TranslateInput(log func(string)) {
 	if src == "" {
 		return
 	}
-	ko, err := m.Trans.Translate(src, "zh", "ko")
+	m.mu.Lock()
+	to := m.outLang
+	m.mu.Unlock()
+	if to == "" {
+		to = "ko"
+	}
+	dst, err := m.Trans.Translate(src, "zh", to)
 	if err != nil {
 		if log != nil {
 			log("翻译失败: " + err.Error())
 		}
 		return
 	}
-	if err := memory.PasteToGame(p.PID, ko); err != nil {
+	if err := memory.TranslateChatBox(p.PID, dst); err != nil {
 		if log != nil {
 			log("粘贴失败: " + err.Error())
 		}
 		return
 	}
 	m.mu.Lock()
-	m.lastMine = ko
+	m.lastMine = dst
 	m.mu.Unlock()
 	if log != nil {
-		log("已译韩: " + ko)
+		name := "韩"
+		if to == "en" {
+			name = "英"
+		}
+		log("已译" + name + ": " + dst)
 	}
 }
 

@@ -238,8 +238,17 @@ func GetClipboardText() (string, error) {
 	return windows.UTF16ToString(buf), nil
 }
 
+func restoreClipboard(old string, ok bool) {
+	if ok {
+		_ = SetClipboardText(old)
+	}
+}
+
 // SendChat 打开聊天框、粘贴并发送。初始化定位时使用。
 func SendChat(pid uint32, text string) error {
+	old, err := GetClipboardText()
+	defer restoreClipboard(old, err == nil)
+
 	if err := FocusGame(pid); err != nil {
 		return err
 	}
@@ -278,4 +287,12 @@ func PasteToGame(pid uint32, text string) error {
 	time.Sleep(40 * time.Millisecond)
 	chord(vkControl, vkV)
 	return nil
+}
+
+// TranslateChatBox 把输入框译成 target 并贴回，结束后恢复剪贴板。
+func TranslateChatBox(pid uint32, translated string) error {
+	old, err := GetClipboardText()
+	ok := err == nil
+	defer restoreClipboard(old, ok)
+	return PasteToGame(pid, translated)
 }

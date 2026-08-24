@@ -15,6 +15,7 @@ type Overlay struct {
 
 	OnLocate         func()
 	OnTranslateInput func()
+	OnSwitchLang     func()
 }
 
 func NewOverlay() *Overlay { return &Overlay{} }

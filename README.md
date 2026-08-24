@@ -12,11 +12,12 @@ flowchart TB
     Poll -->|场景切换地址失效| Auto
     Poll --> ZH["说话人：中文译文"]
     ZH --> OV[透明置顶窗]
-    OV -->|"Ctrl+P"| Paste["输入框 中 → 韩"]
+    OV -->|"Ctrl+P"| Paste["输入框 中→韩/英"]
+    OV -->|"Ctrl+L"| Lang[切换韩/英]
 ```
 
-Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 下载后 **管理员运行**，游戏用**窗口化最大化**。双击即监控，选人/局内都会跟。Ctrl+P 中译韩成功就说明翻译引擎可用。
+Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 双击后会要管理员。窗口化最大化。选人/局内自动跟。Ctrl+P 译出，Ctrl+L 切韩/英。
 
 ```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o hostrans.exe .
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .
 ```

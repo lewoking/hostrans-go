@@ -171,23 +171,37 @@ func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 			if err := m.LocatePassive(nil); err != nil {
 				passiveFail++
 				if passiveFail >= 2 && m.windowReady() {
-					if sink != nil {
-						sink.Status("当前界面发探测串以锁定聊天")
-						sink.Stay()
-					}
-					if err := m.Locate(func(s string) {
+					m.mu.Lock()
+					tooSoon := !m.lastProbe.IsZero() && time.Since(m.lastProbe) < 45*time.Second
+					m.mu.Unlock()
+					if tooSoon {
 						if sink != nil {
-							sink.Status(s)
+							sink.Status("等待能打字的界面（选人/局内）")
 							sink.Stay()
 						}
-					}); err != nil {
+					} else {
 						if sink != nil {
-							sink.Status("等能打字后再试（选人或局内）")
+							sink.Status("当前界面发探测串以锁定聊天")
 							sink.Stay()
 						}
-					} else if sink != nil {
-						sink.Status(fmt.Sprintf("已监听当前场景（%d 处），换场景会自动跟", m.BufferCount()))
-						sink.Show()
+						err := m.Locate(func(s string) {
+							if sink != nil {
+								sink.Status(s)
+								sink.Stay()
+							}
+						})
+						m.mu.Lock()
+						m.lastProbe = time.Now()
+						m.mu.Unlock()
+						if err != nil {
+							if sink != nil {
+								sink.Status("等能打字后再试（选人或局内）")
+								sink.Stay()
+							}
+						} else if sink != nil {
+							sink.Status(fmt.Sprintf("已监听当前场景（%d 处），换场景会自动跟", m.BufferCount()))
+							sink.Show()
+						}
 					}
 					passiveFail = 0
 				}
@@ -206,7 +220,7 @@ func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 
 		passiveFail = 0
 		_ = m.LocatePassive(nil)
-		if !sleepStop(8*time.Second, stop) {
+		if !sleepStop(20*time.Second, stop) {
 			return
 		}
 	}
