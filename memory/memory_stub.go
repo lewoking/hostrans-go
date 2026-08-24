@@ -4,7 +4,6 @@ package memory
 
 import "fmt"
 
-// Process stub for non-Windows
 type Process struct {
 	PID uint32
 }
@@ -27,6 +26,12 @@ func (p *Process) ReadString(address uintptr, maxLen int, encoding string) (stri
 	return "", fmt.Errorf("not supported")
 }
 
-func (p *Process) ScanPattern(pattern []byte) ([]uintptr, error) {
+func (p *Process) ScanPrivateRW(pattern []byte) ([]uintptr, error) {
 	return nil, fmt.Errorf("not supported")
 }
+
+func (p *Process) FilterContains(addrs []uintptr, pattern []byte) []uintptr {
+	return nil
+}
+
+func (p *Process) Alive() bool { return false }

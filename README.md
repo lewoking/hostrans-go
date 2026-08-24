@@ -4,28 +4,26 @@
 
 ```mermaid
 flowchart TB
-    Start(["hostrans.exe"]) --> Menu{菜单}
+    Start(["hostrans.exe 管理员运行"]) --> Menu{菜单}
 
-    Menu -->|"1 中→韩 ✅"| In[输入文本]
-    Menu -->|"2 韩→中 ✅"| In
-    Menu -->|"3 中→英 ✅"| In
-    Menu -->|"4 内存扫描 Windows"| Find
-    Menu -->|"5 退出"| End([再见])
+    Menu -->|"1/2/3 测试翻译"| In[输入文本]
+    In --> Eng[Microsoft → DeepLX → Youdao]
+    Eng --> Out([译文])
 
-    In --> MS[Microsoft]
-    MS -->|成功| Out([译文])
-    MS -->|失败| DX[DeepLX]
-    DX -->|成功| Out
-    DX -->|失败| YD[Youdao]
-    YD -->|成功| Out
-    YD -->|失败| Fail([全部引擎失败])
+    Menu -->|"4 监控 + 悬浮窗"| OV["透明置顶窗"]
+    OV -->|"Ctrl+1"| Loc["发 3 次探测串 → 私有堆求交"]
+    Loc --> Poll["每 0.8s 读聊天缓冲"]
+    Poll --> Parse["解析 说话人 + 正文"]
+    Parse --> KO{含韩文?}
+    KO -->|是| ZH["说话人：中文译文"]
+    ZH --> OV
+    OV -->|"Ctrl+P"| Paste["输入框 中 → 韩"]
+    OV -->|"Ctrl+Tab / 4.5s"| Hide[显示 / 自动隐藏]
 
-    Find[查找 HeroesOfTheStorm_x64.exe ✅] --> Open[打开进程句柄 ✅]
-    Open --> Chat[特征码定位聊天 ⏳]
-    Chat -.-> Overlay[悬浮窗 / 热键 ⏳]
+    Menu -->|5| End([退出])
 ```
 
-Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 下载 `hostrans.exe` 后双击。macOS / Linux 交叉编译：
+Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 下载后 **管理员运行**。游戏请用**窗口化最大化**，进对局后按 **Ctrl+1** 初始化。
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o hostrans.exe .

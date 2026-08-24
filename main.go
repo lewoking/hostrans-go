@@ -10,22 +10,21 @@ import (
 	"time"
 
 	"hostrans/memory"
+	"hostrans/monitor"
 	"hostrans/translator"
+	"hostrans/ui"
 )
 
-const (
-	GameProcessName = "HeroesOfTheStorm_x64.exe"
-)
+const GameProcessName = "HeroesOfTheStorm_x64.exe"
 
 func main() {
 	fmt.Println("========================================")
-	fmt.Println("  HOSTrans Go 版  |  无 Key 开箱即用")
+	fmt.Println("  HOSTrans Go  |  无 Key 开箱即用")
 	fmt.Println("  引擎: Microsoft → DeepLX → Youdao")
 	fmt.Println("========================================")
 	fmt.Printf("当前系统: %s/%s\n\n", runtime.GOOS, runtime.GOARCH)
 
 	trans := translator.NewManager()
-
 	reader := bufio.NewReader(os.Stdin)
 
 	for {
@@ -33,7 +32,7 @@ func main() {
 		fmt.Println("  1. 测试翻译（中 → 韩）")
 		fmt.Println("  2. 测试翻译（韩 → 中）")
 		fmt.Println("  3. 测试翻译（中 → 英）")
-		fmt.Println("  4. 初始化游戏内存扫描 (仅 Windows)")
+		fmt.Println("  4. 启动监控 + 悬浮窗 (Windows)")
 		fmt.Println("  5. 退出")
 		fmt.Print("输入选项: ")
 
@@ -48,11 +47,7 @@ func main() {
 		case "3":
 			testTranslate(trans, reader, "zh", "en")
 		case "4":
-			if runtime.GOOS != "windows" {
-				fmt.Println("→ 内存扫描功能仅支持 Windows 系统")
-				continue
-			}
-			initMemory()
+			startMonitor(trans)
 		case "5", "q", "quit", "exit":
 			fmt.Println("再见")
 			return
@@ -84,12 +79,21 @@ func testTranslate(trans *translator.Manager, reader *bufio.Reader, from, to str
 	fmt.Printf("结果 (%.2fs):\n%s\n", elapsed.Seconds(), result)
 }
 
-func initMemory() {
-	fmt.Println("正在查找游戏进程...")
+func startMonitor(trans *translator.Manager) {
+	if runtime.GOOS != "windows" {
+		fmt.Println("→ 监控和悬浮窗仅支持 Windows。请交叉编译后在游戏电脑运行。")
+		return
+	}
+
+	fmt.Println("建议：管理员运行 + 游戏窗口化最大化 + 先进入对局。")
+	fmt.Println("Ctrl+1 初始化（会自动发 3 条探测聊天）")
+	fmt.Println("Ctrl+Tab 显示悬浮窗  ·  Ctrl+P 输入框中译韩")
+	fmt.Println("点 × 关闭悬浮窗并返回菜单")
+
+	memory.EnableDebugPrivilege()
 	pid, err := memory.FindProcess(GameProcessName)
 	if err != nil {
-		fmt.Printf("未找到进程 %s: %v\n", GameProcessName, err)
-		fmt.Println("请先启动《风暴英雄》并进入游戏。")
+		fmt.Printf("未找到进程 %s: %v\n请先启动游戏。\n", GameProcessName, err)
 		return
 	}
 	fmt.Printf("找到进程 PID = %d\n", pid)
@@ -100,11 +104,30 @@ func initMemory() {
 		return
 	}
 	defer proc.Close()
-	fmt.Println("进程句柄已打开。")
 
-	fmt.Println("\n注意：完整的聊天地址定位需要根据原版特征码进行扫描。")
-	fmt.Println("当前版本已具备内存读取能力，后续可补充具体 pattern。")
-	fmt.Println("现在可以先用菜单 1/2/3 测试无 Key 翻译引擎。")
+	mon := monitor.New(proc, trans)
+	ov := ui.NewOverlay()
+
+	ov.OnLocate = func() {
+		ov.Status("初始化中，不要操作键鼠…")
+		ov.Show()
+		if err := mon.Locate(ov.Status); err != nil {
+			ov.Status(err.Error())
+			ov.Show()
+			return
+		}
+		ov.Status("已开始监控韩语聊天")
+		ov.Show()
+	}
+	ov.OnTranslateInput = func() {
+		mon.TranslateInput(ov.Status)
+		ov.Show()
+	}
+
+	stop := make(chan struct{})
+	go mon.Loop(800*time.Millisecond, ov, stop)
+	_ = ov.Run()
+	close(stop)
 }
 
 func init() {
