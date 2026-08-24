@@ -48,7 +48,6 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 	vk1         = 0x31
-	vkL         = 0x4C
 
 	dtLeft      = 0x0000
 	dtWordBreak = 0x0010
@@ -63,7 +62,6 @@ const (
 	hotLocate  = 1
 	hotShow    = 2
 	hotTransIn = 3
-	hotLang    = 4
 
 	winW = 360
 	winH = 440
@@ -121,7 +119,6 @@ type Overlay struct {
 
 	OnLocate         func()
 	OnTranslateInput func()
-	OnSwitchLang     func()
 }
 
 var (
@@ -297,10 +294,9 @@ func (o *Overlay) Run() error {
 	procRegisterHotKey.Call(hwnd, hotLocate, modFlags, vk1)
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
-	procRegisterHotKey.Call(hwnd, hotLang, modFlags, vkL)
 
 	o.Status("自动定位选人 / 局内聊天")
-	o.Status("Ctrl+P 译出  ·  Ctrl+L 韩/英  ·  Ctrl+Tab 显示")
+	o.Status("Ctrl+P 中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
 	o.armHide()
 
 	var m msg
@@ -316,7 +312,6 @@ func (o *Overlay) Run() error {
 	procUnregisterHotKey.Call(hwnd, hotLocate)
 	procUnregisterHotKey.Call(hwnd, hotShow)
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
-	procUnregisterHotKey.Call(hwnd, hotLang)
 	if o.font != 0 {
 		procDeleteObject.Call(o.font)
 	}
@@ -360,10 +355,6 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 		case hotTransIn:
 			if o.OnTranslateInput != nil {
 				go o.OnTranslateInput()
-			}
-		case hotLang:
-			if o.OnSwitchLang != nil {
-				o.OnSwitchLang()
 			}
 		}
 		return 0
@@ -472,5 +463,5 @@ func (o *Overlay) paint(hwnd uintptr) {
 		h := draw(14, y, winW-28, 80, col, s)
 		y += h + 6
 	}
-	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+P 译出  Ctrl+L 韩/英  Ctrl+Tab")
+	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+P 中译韩  Ctrl+Tab 显示")
 }

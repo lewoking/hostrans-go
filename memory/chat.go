@@ -150,24 +150,9 @@ func ContainsHan(s string) bool {
 	return false
 }
 
-// NeedsTranslate 自动监控只翻译「含韩文」或「纯拉丁且几乎无汉字」的发言。
+// NeedsTranslate 自动监控只翻译含韩文的发言（英文不译）。
 func NeedsTranslate(text string) bool {
-	if strings.TrimSpace(text) == "" {
-		return false
-	}
-	if ContainsKorean(text) {
-		return true
-	}
-	if ContainsHan(text) {
-		return false
-	}
-	letters := 0
-	for _, r := range text {
-		if unicode.IsLetter(r) {
-			letters++
-		}
-	}
-	return letters >= 3
+	return ContainsKorean(strings.TrimSpace(text))
 }
 
 func DisplaySpeaker(line ChatLine) string {

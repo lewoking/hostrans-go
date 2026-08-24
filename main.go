@@ -31,7 +31,7 @@ func main() {
 		fmt.Println("未取得管理员权限，内存读取可能失败。")
 	}
 
-	fmt.Println("窗口化最大化  ·  Ctrl+P 译出  ·  Ctrl+L 韩/英  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
+	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 重定位")
 
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())
@@ -50,11 +50,6 @@ func main() {
 	}
 	ov.OnTranslateInput = func() {
 		mon.TranslateInput(ov.Status)
-		ov.Show()
-	}
-	ov.OnSwitchLang = func() {
-		name := mon.ToggleOutLang()
-		ov.Status("译出语言: 中 → " + name)
 		ov.Show()
 	}
 

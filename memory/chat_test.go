@@ -40,6 +40,9 @@ func TestShouldSkipAndNeedsTranslate(t *testing.T) {
 	if NeedsTranslate("大家好，集合中路") {
 		t.Fatal("pure chinese should not translate")
 	}
+	if NeedsTranslate("gg wp mid") {
+		t.Fatal("english should not translate")
+	}
 	probes := map[string]struct{}{"HT1234567890": {}}
 	p := ParseChatLine("HT1234567890")
 	if !ShouldSkip(p, probes) {

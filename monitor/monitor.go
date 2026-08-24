@@ -38,7 +38,6 @@ type Monitor struct {
 	buffers   []buffer
 	probes    map[string]struct{}
 	lastMine  string
-	outLang   string
 	lastProbe time.Time
 	seen      *seenSet
 	locating  int32
@@ -73,32 +72,11 @@ func (s *seenSet) Add(x string) bool {
 
 func New(trans *translator.Manager) *Monitor {
 	return &Monitor{
-		Trans:   trans,
-		probes:  make(map[string]struct{}),
-		seen:    newSeen(),
-		outLang: "ko",
-		jobs:    make(chan translateJob, 24),
+		Trans:  trans,
+		probes: make(map[string]struct{}),
+		seen:   newSeen(),
+		jobs:   make(chan translateJob, 24),
 	}
-}
-
-func (m *Monitor) OutLangName() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.outLang == "en" {
-		return "英语"
-	}
-	return "韩语"
-}
-
-func (m *Monitor) ToggleOutLang() string {
-	m.mu.Lock()
-	if m.outLang == "en" {
-		m.outLang = "ko"
-	} else {
-		m.outLang = "en"
-	}
-	m.mu.Unlock()
-	return m.OutLangName()
 }
 
 func (m *Monitor) Ready() bool {
@@ -373,13 +351,7 @@ func (m *Monitor) TranslateInput(log func(string)) {
 	if src == "" {
 		return
 	}
-	m.mu.Lock()
-	to := m.outLang
-	m.mu.Unlock()
-	if to == "" {
-		to = "ko"
-	}
-	dst, err := m.Trans.Translate(src, "zh", to)
+	dst, err := m.Trans.Translate(src, "zh", "ko")
 	if err != nil {
 		if log != nil {
 			log("翻译失败: " + err.Error())
@@ -396,11 +368,7 @@ func (m *Monitor) TranslateInput(log func(string)) {
 	m.lastMine = dst
 	m.mu.Unlock()
 	if log != nil {
-		name := "韩"
-		if to == "en" {
-			name = "英"
-		}
-		log("已译" + name + ": " + dst)
+		log("已译韩: " + dst)
 	}
 }
 
