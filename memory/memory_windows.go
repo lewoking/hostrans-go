@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	GameProcessName = "HeroesOfTheStorm_x64.exe"
+
 	memCommit     = 0x1000
 	memPrivate    = 0x20000
 	pageReadWrite = 0x04
@@ -118,10 +120,19 @@ func (p *Process) queryMBI(addr uintptr) (windows.MemoryBasicInformation, error)
 
 // ScanPrivateRW 只扫已提交的私有可写堆，适合定位聊天缓冲区。
 func (p *Process) ScanPrivateRW(pattern []byte) ([]uintptr, error) {
-	if len(pattern) == 0 {
-		return nil, fmt.Errorf("empty pattern")
+	hits, err := p.ScanPrivateRWMulti([][]byte{pattern})
+	if err != nil {
+		return nil, err
 	}
-	var results []uintptr
+	return hits[0], nil
+}
+
+// ScanPrivateRWMulti 一次遍历堆，同时搜多组字节串。
+func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
+	hits := make([][]uintptr, len(patterns))
+	if len(patterns) == 0 {
+		return hits, nil
+	}
 	var addr uintptr
 	for {
 		mbi, err := p.queryMBI(addr)
@@ -136,14 +147,19 @@ func (p *Process) ScanPrivateRW(pattern []byte) ([]uintptr, error) {
 			mbi.RegionSize <= maxScanRegion {
 			data, err := p.ReadMemory(mbi.BaseAddress, uint(mbi.RegionSize))
 			if err == nil {
-				offset := 0
-				for {
-					idx := bytes.Index(data[offset:], pattern)
-					if idx < 0 {
-						break
+				for i, pat := range patterns {
+					if len(pat) == 0 {
+						continue
 					}
-					results = append(results, mbi.BaseAddress+uintptr(offset+idx))
-					offset += idx + 1
+					offset := 0
+					for {
+						idx := bytes.Index(data[offset:], pat)
+						if idx < 0 {
+							break
+						}
+						hits[i] = append(hits[i], mbi.BaseAddress+uintptr(offset+idx))
+						offset += idx + 1
+					}
 				}
 			}
 		}
@@ -152,7 +168,7 @@ func (p *Process) ScanPrivateRW(pattern []byte) ([]uintptr, error) {
 		}
 		addr = next
 	}
-	return results, nil
+	return hits, nil
 }
 
 // FilterContains 从候选地址中筛出当前仍以 pattern 开头的位置。

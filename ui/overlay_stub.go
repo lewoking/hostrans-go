@@ -34,6 +34,7 @@ func (o *Overlay) Status(msg string) {
 }
 
 func (o *Overlay) Show() {}
+func (o *Overlay) Stay() {}
 func (o *Overlay) Hide() {}
 
 func (o *Overlay) Run() error {

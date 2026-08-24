@@ -203,6 +203,18 @@ func (o *Overlay) Show() {
 	o.armHide()
 }
 
+func (o *Overlay) Stay() {
+	if o.hwnd != 0 {
+		procPostMessageW.Call(o.hwnd, wmAppShow, 0, 0)
+	}
+	o.mu.Lock()
+	if o.hideT != nil {
+		o.hideT.Stop()
+		o.hideT = nil
+	}
+	o.mu.Unlock()
+}
+
 func (o *Overlay) Hide() {
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppHide, 0, 0)
@@ -283,8 +295,8 @@ func (o *Overlay) Run() error {
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
 
-	o.Status("Ctrl+1 初始化聊天监控")
-	o.Status("Ctrl+Tab 显示  ·  Ctrl+P 中译韩")
+	o.Status("自动定位选人 / 局内聊天")
+	o.Status("Ctrl+Tab 显示  ·  Ctrl+P 中译韩  ·  Ctrl+1 重定位")
 	o.armHide()
 
 	var m msg
@@ -451,5 +463,5 @@ func (o *Overlay) paint(hwnd uintptr) {
 		h := draw(14, y, winW-28, 80, col, s)
 		y += h + 6
 	}
-	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+1 初始化  Ctrl+Tab 显示")
+	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "选人+局内自动跟  Ctrl+Tab 显示")
 }

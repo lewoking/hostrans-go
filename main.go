@@ -15,8 +15,6 @@ import (
 	"hostrans/ui"
 )
 
-const GameProcessName = "HeroesOfTheStorm_x64.exe"
-
 func main() {
 	fmt.Println("========================================")
 	fmt.Println("  HOSTrans Go  |  无 Key 开箱即用")
@@ -85,38 +83,24 @@ func startMonitor(trans *translator.Manager) {
 		return
 	}
 
-	fmt.Println("建议：管理员运行 + 游戏窗口化最大化 + 先进入对局。")
-	fmt.Println("Ctrl+1 初始化（会自动发 3 条探测聊天）")
-	fmt.Println("Ctrl+Tab 显示悬浮窗  ·  Ctrl+P 输入框中译韩")
+	fmt.Println("管理员运行 + 游戏窗口化最大化。")
+	fmt.Println("选人阶段和游戏内都会自动跟；场景切换会重新定位。")
+	fmt.Println("Ctrl+P 输入框中译韩  ·  Ctrl+Tab 显示  ·  Ctrl+1 强制重定位")
 	fmt.Println("点 × 关闭悬浮窗并返回菜单")
 
 	memory.EnableDebugPrivilege()
-	pid, err := memory.FindProcess(GameProcessName)
-	if err != nil {
-		fmt.Printf("未找到进程 %s: %v\n请先启动游戏。\n", GameProcessName, err)
-		return
-	}
-	fmt.Printf("找到进程 PID = %d\n", pid)
-
-	proc, err := memory.Open(pid)
-	if err != nil {
-		fmt.Printf("打开进程失败: %v\n", err)
-		return
-	}
-	defer proc.Close()
-
-	mon := monitor.New(proc, trans)
+	mon := monitor.New(trans)
 	ov := ui.NewOverlay()
 
 	ov.OnLocate = func() {
-		ov.Status("初始化中，不要操作键鼠…")
-		ov.Show()
+		ov.Status("强制重定位当前界面…")
+		ov.Stay()
 		if err := mon.Locate(ov.Status); err != nil {
 			ov.Status(err.Error())
-			ov.Show()
+			ov.Stay()
 			return
 		}
-		ov.Status("已开始监控韩语聊天")
+		ov.Status("已监听当前场景")
 		ov.Show()
 	}
 	ov.OnTranslateInput = func() {
@@ -125,9 +109,11 @@ func startMonitor(trans *translator.Manager) {
 	}
 
 	stop := make(chan struct{})
+	go mon.AutoInit(stop, ov)
 	go mon.Loop(800*time.Millisecond, ov, stop)
 	_ = ov.Run()
 	close(stop)
+	mon.CloseProc()
 }
 
 func init() {

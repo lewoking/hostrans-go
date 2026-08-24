@@ -4,6 +4,8 @@ package memory
 
 import "fmt"
 
+const GameProcessName = "HeroesOfTheStorm_x64.exe"
+
 type Process struct {
 	PID uint32
 }
@@ -27,6 +29,10 @@ func (p *Process) ReadString(address uintptr, maxLen int, encoding string) (stri
 }
 
 func (p *Process) ScanPrivateRW(pattern []byte) ([]uintptr, error) {
+	return nil, fmt.Errorf("not supported")
+}
+
+func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
 	return nil, fmt.Errorf("not supported")
 }
 
