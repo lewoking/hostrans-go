@@ -25,7 +25,7 @@ flowchart TB
     Chat -.-> Overlay[悬浮窗 / 热键 ⏳]
 ```
 
-Windows 运行：双击 `hostrans.exe`。macOS / Linux 交叉编译：
+Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 下载 `hostrans.exe` 后双击。macOS / Linux 交叉编译：
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o hostrans.exe .
