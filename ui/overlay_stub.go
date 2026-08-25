@@ -22,8 +22,8 @@ func NewOverlay() *Overlay { return &Overlay{} }
 func (o *Overlay) Push(speaker, text string) {
 	o.mu.Lock()
 	o.lines = append(o.lines, Line{Speaker: speaker, Text: text})
-	if len(o.lines) > 12 {
-		o.lines = o.lines[len(o.lines)-12:]
+	if len(o.lines) > 6 {
+		o.lines = o.lines[len(o.lines)-6:]
 	}
 	o.mu.Unlock()
 	fmt.Printf("%s：%s\n", speaker, text)

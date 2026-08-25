@@ -46,7 +46,6 @@ func main() {
 	go trans.Warmup()
 	mon := monitor.New(trans)
 	ov := ui.NewOverlay()
-	ov.Status("日志 " + dlog.Path() + "  " + dlog.Version)
 
 	ov.OnTranslateInput = func() {
 		ov.Stay()

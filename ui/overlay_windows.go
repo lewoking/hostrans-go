@@ -62,8 +62,17 @@ const (
 	hotShow    = 2
 	hotTransIn = 3
 
-	winW = 360
-	winH = 440
+	winW     = 360
+	maxChat  = 6
+	lineMinH = 22
+	lineGap  = 6
+	padTop   = 8
+	padBot   = 8
+	winH     = padTop + maxChat*(lineMinH+lineGap) + padBot
+
+	spiGetWorkArea = 0x0030
+	smCxScreen     = 0
+	smCyScreen     = 1
 )
 
 type rect struct {
@@ -156,6 +165,8 @@ var (
 	procSetTextColor               = gdi32.NewProc("SetTextColor")
 	procSetBkMode                  = gdi32.NewProc("SetBkMode")
 	procCreateSolidBrush           = gdi32.NewProc("CreateSolidBrush")
+	procGetSystemMetrics           = user32.NewProc("GetSystemMetrics")
+	procSystemParametersInfoW      = user32.NewProc("SystemParametersInfoW")
 
 	wndProcCB = syscall.NewCallback(wndProc)
 	active    *Overlay
@@ -172,26 +183,15 @@ func NewOverlay() *Overlay {
 func (o *Overlay) Push(speaker, text string) {
 	o.mu.Lock()
 	o.lines = append(o.lines, Line{Speaker: speaker, Text: text})
-	if len(o.lines) > 12 {
-		o.lines = o.lines[len(o.lines)-12:]
+	if len(o.lines) > maxChat {
+		o.lines = o.lines[len(o.lines)-maxChat:]
 	}
 	o.mu.Unlock()
 	o.redraw()
 }
 
 func (o *Overlay) Status(msg string) {
-	o.mu.Lock()
-	// 状态去重：覆盖最后一条状态
-	if n := len(o.lines); n > 0 && o.lines[n-1].Status && o.lines[n-1].Text == msg {
-		o.mu.Unlock()
-		return
-	}
-	o.lines = append(o.lines, Line{Text: msg, Status: true})
-	if len(o.lines) > 12 {
-		o.lines = o.lines[len(o.lines)-12:]
-	}
-	o.mu.Unlock()
-	o.redraw()
+	// 路径/版本/状态不进悬浮窗
 }
 
 func (o *Overlay) Show() {
@@ -248,12 +248,13 @@ func (o *Overlay) Run() error {
 	active = o
 	ex := uintptr(wsExLayered | wsExTopmost | wsExToolwindow)
 	style := uintptr(wsPopup | wsVisible)
+	x, y := overlayOrigin()
 	hwnd, _, err := procCreateWindowExW.Call(
 		ex,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(title)),
 		style,
-		80, 80, winW, winH,
+		uintptr(x), uintptr(y), winW, winH,
 		0, 0, mod, 0,
 	)
 	if hwnd == 0 {
@@ -306,6 +307,26 @@ func (o *Overlay) Run() error {
 	}
 	active = nil
 	return nil
+}
+
+func overlayOrigin() (x, y int32) {
+	var wa rect
+	ok, _, _ := procSystemParametersInfoW.Call(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&wa)), 0)
+	if ok == 0 {
+		sw, _, _ := procGetSystemMetrics.Call(smCxScreen)
+		sh, _, _ := procGetSystemMetrics.Call(smCyScreen)
+		wa = rect{Right: int32(sw), Bottom: int32(sh)}
+	}
+	const margin = 24
+	x = wa.Right - winW - margin
+	if x < wa.Left {
+		x = wa.Left
+	}
+	y = wa.Top + (wa.Bottom-wa.Top-winH)/2
+	if y < wa.Top {
+		y = wa.Top
+	}
+	return
 }
 
 func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
@@ -439,22 +460,20 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return r.Right - r.Left
 	}
 
-	y := int32(8)
-	draw(o.fontHint, 14, y, winW-50, 14, teamBlue, "HOSTrans")
-	draw(o.fontHint, winW-28, y, 20, 14, chatWhite, "×")
-	y += 18
+	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
 
 	o.mu.Lock()
 	lines := append([]Line(nil), o.lines...)
 	o.mu.Unlock()
 
-	maxY := int32(winH - 28)
+	y := int32(padTop)
+	maxY := int32(winH - padBot)
+	shown := 0
 	for _, ln := range lines {
-		if y >= maxY {
+		if y >= maxY || shown >= maxChat {
 			break
 		}
 		if ln.Status {
-			y += draw(o.fontHint, 14, y, winW-28, 14, chatWhite, ln.Text) + 4
 			continue
 		}
 		who := ln.Speaker
@@ -465,12 +484,12 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := draw(o.fontChat, 14, y, ww+2, 20, teamBlue, who)
-		h2 := draw(o.fontChat, 14+ww, y, winW-28-ww, 20, chatWhite, ln.Text)
+		h1 := draw(o.fontChat, 14, y, ww+2, lineMinH, teamBlue, who)
+		h2 := draw(o.fontChat, 14+ww, y, winW-28-ww, lineMinH, chatWhite, ln.Text)
 		if h2 > h1 {
 			h1 = h2
 		}
-		y += h1 + 6
+		y += h1 + lineGap
+		shown++
 	}
-	draw(o.fontHint, 14, winH-22, winW-28, 14, teamBlue, "P中↔韩 空初始化")
 }
