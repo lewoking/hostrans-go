@@ -312,7 +312,7 @@ func clipRunes(s string, max int) string {
 	return string(r[:max])
 }
 
-// Translate 自动尝试所有引擎，成功即返回（带短缓存，避免同一句反复打接口）。
+// Translate 并发打所有引擎，谁先给出有效译文用谁（带短缓存）。
 func (m *Manager) Translate(text, from, to string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -327,34 +327,57 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 	}
 	m.mu.Unlock()
 
-	var lastErr error
+	type outcome struct {
+		name string
+		out  string
+		err  error
+	}
+	ch := make(chan outcome, len(m.engines))
 	for _, eng := range m.engines {
-		result, err := eng.Translate(text, from, to)
-		if err == nil && AcceptTranslation(text, result, to) {
-			m.mu.Lock()
-			if len(m.order) >= 400 {
-				old := m.order[0]
-				m.order = m.order[1:]
-				delete(m.cache, old)
+		eng := eng
+		go func() {
+			out, err := eng.Translate(text, from, to)
+			if err == nil && !AcceptTranslation(text, out, to) {
+				err = fmt.Errorf("%s 未译成目标语言", eng.Name())
 			}
-			m.cache[key] = result
-			m.order = append(m.order, key)
-			m.mu.Unlock()
-			dlog.Debugf("trans %s %s→%s src=%q dst=%q", eng.Name(), from, to, text, result)
-			return result, nil
+			ch <- outcome{name: eng.Name(), out: out, err: err}
+		}()
+	}
+
+	var lastErr error
+	for i := 0; i < len(m.engines); i++ {
+		r := <-ch
+		if r.err == nil && r.out != "" {
+			m.remember(key, r.out)
+			dlog.Debugf("trans %s %s→%s src=%q dst=%q", r.name, from, to, text, r.out)
+			return r.out, nil
 		}
-		if err != nil {
-			lastErr = err
-			dlog.Infof("trans %s %s→%s FAIL src=%q err=%v", eng.Name(), from, to, text, err)
+		lastErr = r.err
+		if r.out != "" {
+			dlog.Infof("trans %s %s→%s REJECT src=%q dst=%q", r.name, from, to, text, r.out)
 		} else {
-			lastErr = fmt.Errorf("%s 未译成目标语言", eng.Name())
-			dlog.Infof("trans %s %s→%s REJECT src=%q dst=%q", eng.Name(), from, to, text, result)
+			dlog.Infof("trans %s %s→%s FAIL src=%q err=%v", r.name, from, to, text, r.err)
 		}
 	}
 	if lastErr != nil {
 		return "", fmt.Errorf("翻译失败")
 	}
 	return "", fmt.Errorf("翻译失败")
+}
+
+func (m *Manager) remember(key, result string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.cache[key]; ok {
+		return
+	}
+	if len(m.order) >= 400 {
+		old := m.order[0]
+		m.order = m.order[1:]
+		delete(m.cache, old)
+	}
+	m.cache[key] = result
+	m.order = append(m.order, key)
 }
 
 func (m *Manager) Name() string {
