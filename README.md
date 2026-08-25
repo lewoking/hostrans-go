@@ -19,9 +19,7 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 自动没找到：空聊天框 Ctrl+P 手动初始化
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
-- 托盘图标退出（Win11 可能在任务栏 `^` 隐藏图标里），或再次运行 / `hostrans.exe --quit`
-- 翻译：AI（gpt-5.6-luna）与 DeepLX 并发，先返回的有效译文胜出
-- 排查日志：`%TEMP%\hostrans.log`（悬浮窗显示路径）。**v1.0.0 前默认 debug**，正式版只留 info
+
 
 密钥不进源码。本地把 `HOSTTRANS_AI_KEY` 写在 gitignore 的 `.secrets`，再构建：
 
