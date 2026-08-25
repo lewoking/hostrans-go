@@ -48,10 +48,11 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 
-	dtLeft      = 0x0000
-	dtWordBreak = 0x0010
-	dtNoPrefix  = 0x0800
-	dtCalcRect  = 0x0400
+	dtLeft       = 0x0000
+	dtWordBreak  = 0x0010
+	dtNoPrefix   = 0x0800
+	dtCalcRect   = 0x0400
+	dtSingleLine = 0x0020
 	transparent = 1
 	fwNormal    = 400
 	defaultChar = 1
@@ -422,10 +423,25 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return height
 	}
 
-	hint := rgb(110, 110, 110)
+	teamBlue := rgb(0x31, 0x84, 0xFF)
+	chatWhite := rgb(255, 255, 255)
+	measureW := func(font uintptr, s string) int32 {
+		if s == "" {
+			return 0
+		}
+		if font != 0 {
+			procSelectObject.Call(hdc, font)
+		}
+		r := rect{Right: winW, Bottom: 40}
+		u, _ := windows.UTF16FromString(s)
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+			uintptr(unsafe.Pointer(&r)), dtLeft|dtNoPrefix|dtCalcRect|dtSingleLine)
+		return r.Right - r.Left
+	}
+
 	y := int32(8)
-	draw(o.fontHint, 14, y, winW-50, 14, hint, "HOSTrans")
-	draw(o.fontHint, winW-28, y, 20, 14, rgb(90, 90, 90), "×")
+	draw(o.fontHint, 14, y, winW-50, 14, teamBlue, "HOSTrans")
+	draw(o.fontHint, winW-28, y, 20, 14, chatWhite, "×")
 	y += 18
 
 	o.mu.Lock()
@@ -438,10 +454,23 @@ func (o *Overlay) paint(hwnd uintptr) {
 			break
 		}
 		if ln.Status {
-			y += draw(o.fontHint, 14, y, winW-28, 14, hint, ln.Text) + 4
-		} else {
-			y += draw(o.fontChat, 14, y, winW-28, 20, rgb(255, 230, 140), ln.Speaker+"："+ln.Text) + 6
+			y += draw(o.fontHint, 14, y, winW-28, 14, chatWhite, ln.Text) + 4
+			continue
 		}
+		who := ln.Speaker
+		if who != "" {
+			who += "："
+		}
+		ww := measureW(o.fontChat, who)
+		if ww > winW-80 {
+			ww = winW - 80
+		}
+		h1 := draw(o.fontChat, 14, y, ww+2, 20, teamBlue, who)
+		h2 := draw(o.fontChat, 14+ww, y, winW-28-ww, 20, chatWhite, ln.Text)
+		if h2 > h1 {
+			h1 = h2
+		}
+		y += h1 + 6
 	}
-	draw(o.fontHint, 14, winH-22, winW-28, 14, hint, "P译韩 空初始化")
+	draw(o.fontHint, 14, winH-22, winW-28, 14, teamBlue, "P译韩 空初始化")
 }
