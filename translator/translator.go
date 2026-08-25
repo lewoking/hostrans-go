@@ -340,15 +340,15 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 			m.cache[key] = result
 			m.order = append(m.order, key)
 			m.mu.Unlock()
-			dlog.Printf("trans %s %s→%s src=%q dst=%q", eng.Name(), from, to, text, result)
+			dlog.Debugf("trans %s %s→%s src=%q dst=%q", eng.Name(), from, to, text, result)
 			return result, nil
 		}
 		if err != nil {
 			lastErr = err
-			dlog.Printf("trans %s %s→%s FAIL src=%q err=%v", eng.Name(), from, to, text, err)
+			dlog.Infof("trans %s %s→%s FAIL src=%q err=%v", eng.Name(), from, to, text, err)
 		} else {
 			lastErr = fmt.Errorf("%s 未译成目标语言", eng.Name())
-			dlog.Printf("trans %s %s→%s REJECT src=%q dst=%q", eng.Name(), from, to, text, result)
+			dlog.Infof("trans %s %s→%s REJECT src=%q dst=%q", eng.Name(), from, to, text, result)
 		}
 	}
 	if lastErr != nil {

@@ -20,8 +20,8 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
 - 托盘图标退出（Win11 可能在任务栏 `^` 隐藏图标里），或再次运行 / `hostrans.exe --quit`
-- 排查日志：`%TEMP%\hostrans.log`（悬浮窗也会显示路径）
+- 排查日志：`%TEMP%\hostrans.log`（悬浮窗显示路径）。**v1.0.0 前默认 debug**，正式版只留 info
 
 ```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui -X hostrans/dlog.Version=v0.5.4" -o hostrans.exe .
 ```

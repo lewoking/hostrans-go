@@ -39,12 +39,12 @@ func main() {
 	}
 
 	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩（空框则初始化）")
-	dlog.Printf("start admin=%v log=%s", memory.IsAdmin(), dlog.Path())
+	dlog.Infof("start version=%s debug=%v admin=%v log=%s", dlog.Version, dlog.DebugEnabled(dlog.Version), memory.IsAdmin(), dlog.Path())
 
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())
 	ov := ui.NewOverlay()
-	ov.Status("日志 " + dlog.Path())
+	ov.Status("日志 " + dlog.Path() + "  " + dlog.Version)
 
 	ov.OnTranslateInput = func() {
 		ov.Stay()
