@@ -230,7 +230,7 @@ func (m *Monitor) Tick(sink Sink) {
 
 	changed := false
 	for i := range bufs {
-		raw, err := p.ReadString(bufs[i].addr, 320, bufs[i].enc)
+		raw, err := p.ReadString(bufs[i].addr, 1024, bufs[i].enc)
 		if err != nil {
 			bufs[i].fail++
 			changed = true
@@ -267,11 +267,19 @@ func (m *Monitor) Tick(sink Sink) {
 }
 
 func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Sink) {
+	if memory.IsChannelPrefixOnly(raw) {
+		return
+	}
 	line := memory.ParseChatLine(raw)
 	if memory.ShouldSkip(line, probes) {
 		return
 	}
 	body := line.Text
+	if !memory.NeedsTranslate(body) && memory.ContainsKorean(raw) {
+		if body == "" {
+			body = raw
+		}
+	}
 	if body == "" {
 		return
 	}
@@ -284,6 +292,7 @@ func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Si
 	if !memory.NeedsTranslate(body) {
 		return
 	}
+	debugLog("queue ko speaker=%q body=%q", memory.DisplaySpeaker(line), body)
 	job := translateJob{speaker: memory.DisplaySpeaker(line), body: body}
 	select {
 	case m.jobs <- job:
@@ -300,6 +309,7 @@ func (m *Monitor) RunTranslator(stop <-chan struct{}, sink Sink) {
 		case job := <-m.jobs:
 			zh, err := m.Trans.Translate(job.body, "auto", "zh")
 			if err != nil || zh == "" || looksLikeFailure(zh) {
+				debugLog("ko→zh fail speaker=%q body=%q err=%v dst=%q", job.speaker, job.body, err, zh)
 				continue
 			}
 			if sink != nil {
@@ -351,9 +361,9 @@ func (m *Monitor) TranslateInput(log func(string)) {
 		src = ""
 	}
 	src = trimChat(src)
-	debugLog("input capture src=%q err=%v", src, err)
-	// 输入框空/没有中文：当作初始化（原 Ctrl+1）
-	if src == "" || !memory.ContainsHan(src) {
+	debugLog("input capture src=%q kind=%v err=%v", src, memory.ClassifyInput(src), err)
+	switch memory.ClassifyInput(src) {
+	case memory.InputEmpty, memory.InputOther:
 		if log != nil {
 			log("空框，初始化…")
 		}
@@ -364,17 +374,26 @@ func (m *Monitor) TranslateInput(log func(string)) {
 			}
 		}
 		return
+	case memory.InputKorean:
+		// 输入框里的韩文等发出去后由监控翻译；这里不拿来初始化
+		if log != nil {
+			log("韩文发出后会自动译")
+		}
+		return
 	}
 	dst, err := m.Trans.Translate(src, "zh", "ko")
 	if err != nil {
+		debugLog("zh→ko fail src=%q err=%v", src, err)
 		if log != nil {
 			log("翻译失败: " + err.Error())
 		}
 		return
 	}
+	debugLog("zh→ko src=%q dst=%q", src, dst)
 	if err := memory.TranslateChatBox(p.PID, dst); err != nil {
+		debugLog("fill-back fail: %v", err)
 		if log != nil {
-			log("粘贴失败: " + err.Error())
+			log("回填失败: " + err.Error())
 		}
 		return
 	}

@@ -6,6 +6,7 @@ func TestParseChatLine(t *testing.T) {
 	cases := []struct {
 		raw, speaker, text string
 	}{
+		{`[团队] t66y: 대장이 왔이`, "t66y", "대장이 왔이"},
 		{`<c val="3184FF">[团队]:</c>홍길동: 안녕하세요`, "홍길동", "안녕하세요"},
 		{`[All]PlayerOne: gg wp`, "PlayerOne", "gg wp"},
 		{`홍길동: 집결`, "홍길동", "집결"},

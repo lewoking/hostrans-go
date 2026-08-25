@@ -14,6 +14,9 @@ var chatMarkers = []string{
 	`[团队]:`,
 	`[队伍]:`,
 	`[组队]:`,
+	`[团队]`,
+	`[队伍]`,
+	`[组队]`,
 	`[팀]`,
 	`[전체]`,
 	`[All]`,
@@ -141,6 +144,10 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 		}
 		enc := encs[i]
 		for _, addr := range addrs {
+			raw, rerr := p.ReadString(addr, 1024, enc)
+			if rerr != nil || memory.IsChannelPrefixOnly(raw) {
+				continue
+			}
 			if m.addBuffer(enc, addr) {
 				added++
 			}
@@ -168,42 +175,37 @@ func sleepStop(d time.Duration, stop <-chan struct{}) bool {
 	}
 }
 
-// AutoInit 挂上游戏后用聊天标记被动扫描，不往队频发探测串。
+// AutoInit 挂上游戏后反复扫聊天记录（不是输入框前缀）。谁发的韩文都译。
 func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 	var lastErr string
+	var lastCount int
 	for {
 		if err := m.AttachIfNeeded(); err != nil {
-			if sink != nil {
-				sink.Status("等待游戏")
-			}
 			if !sleepStop(3*time.Second, stop) {
 				return
 			}
 			continue
 		}
 		m.pruneDead()
-		if m.BufferCount() == 0 && m.windowReady() {
-			if sink != nil {
-				sink.Status("自动探测中…")
-			}
-			if err := m.LocatePassive(func(s string) {
-				if sink != nil {
-					sink.Status(s)
-				}
-			}); err != nil {
+		if m.windowReady() {
+			err := m.LocatePassive(nil)
+			n := m.BufferCount()
+			if err != nil {
 				msg := err.Error()
 				if msg != lastErr {
 					debugLog("auto locate: %v", err)
 					lastErr = msg
 				}
-				if sink != nil {
-					sink.Status("自动未找到，空框 Ctrl+P")
-				}
-			} else if sink != nil {
-				sink.Status(fmt.Sprintf("自动定位 %d 处", m.BufferCount()))
+			} else if n != lastCount {
+				debugLog("auto locate buffers=%d", n)
 			}
+			lastCount = n
 		}
-		if !sleepStop(3*time.Second, stop) {
+		wait := 8 * time.Second
+		if m.BufferCount() == 0 {
+			wait = 3 * time.Second
+		}
+		if !sleepStop(wait, stop) {
 			return
 		}
 	}

@@ -24,6 +24,7 @@ const (
 	cfUnicodeText    = 13
 	gmemMoveable     = 0x0002
 	swRestore        = 9
+	swShow           = 5
 )
 
 type kbInput struct {
@@ -126,12 +127,15 @@ func FocusGame(pid uint32) error {
 	if err != nil {
 		return err
 	}
-	procShowWindow.Call(uintptr(hwnd), swRestore)
 	fg := windows.GetForegroundWindow()
+	if fg == hwnd {
+		return nil
+	}
+	// 不要 SW_RESTORE，窗口化最大化会被还原，聊天框也容易关掉
+	procShowWindow.Call(uintptr(hwnd), swShow)
 	fgTid, _ := windows.GetWindowThreadProcessId(fg, nil)
 	curTid, _, _ := procGetCurrentThreadId.Call()
 	procAttachThreadInput.Call(uintptr(fgTid), curTid, 1)
-	// 先点一下 Alt，绕过前台锁
 	sendKey(vkMenu, false)
 	sendKey(vkMenu, true)
 	procSetForegroundWindow.Call(uintptr(hwnd))

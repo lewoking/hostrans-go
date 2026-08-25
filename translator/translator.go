@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"hostrans/dlog"
+
 	"github.com/andybalholm/brotli"
 )
 
@@ -328,7 +330,7 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 	var lastErr error
 	for _, eng := range m.engines {
 		result, err := eng.Translate(text, from, to)
-		if err == nil && result != "" {
+		if err == nil && AcceptTranslation(text, result, to) {
 			m.mu.Lock()
 			if len(m.order) >= 400 {
 				old := m.order[0]
@@ -338,9 +340,16 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 			m.cache[key] = result
 			m.order = append(m.order, key)
 			m.mu.Unlock()
+			dlog.Printf("trans %s %s→%s src=%q dst=%q", eng.Name(), from, to, text, result)
 			return result, nil
 		}
-		lastErr = err
+		if err != nil {
+			lastErr = err
+			dlog.Printf("trans %s %s→%s FAIL src=%q err=%v", eng.Name(), from, to, text, err)
+		} else {
+			lastErr = fmt.Errorf("%s 未译成目标语言", eng.Name())
+			dlog.Printf("trans %s %s→%s REJECT src=%q dst=%q", eng.Name(), from, to, text, result)
+		}
 	}
 	if lastErr != nil {
 		return "", fmt.Errorf("翻译失败")

@@ -284,9 +284,6 @@ func (o *Overlay) Run() error {
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
 	startTray(func() { o.Close() })
 
-	o.Status("等待游戏")
-	o.Status("P=译韩/空=初始化")
-
 	var m msg
 	for {
 		r, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0)
