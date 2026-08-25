@@ -43,7 +43,7 @@ func TestParseChatCompletions(t *testing.T) {
 
 func TestNewManagerEngines(t *testing.T) {
 	m := NewManager()
-	if len(m.engines) != 2 || m.engines[0].Name() != "AI-fast" || m.engines[1].Name() != "AI" {
+	if len(m.engines) != 1 || m.engines[0].Name() != "AI" {
 		t.Fatalf("engines=%v", m.engines)
 	}
 }

@@ -19,8 +19,9 @@ const (
 var Version = "dev"
 
 var (
-	mu   sync.Mutex
-	path string
+	mu     sync.Mutex
+	path   string
+	trunc  = true
 )
 
 func Path() string {
@@ -66,7 +67,14 @@ func write(level, format string, args ...interface{}) {
 	initFile()
 	mu.Lock()
 	defer mu.Unlock()
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	flags := os.O_CREATE | os.O_WRONLY
+	if trunc {
+		flags |= os.O_TRUNC
+		trunc = false
+	} else {
+		flags |= os.O_APPEND
+	}
+	f, err := os.OpenFile(path, flags, 0644)
 	if err != nil {
 		return
 	}

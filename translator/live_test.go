@@ -41,7 +41,6 @@ func TestLiveEngines(t *testing.T) {
 		{"안녕하세요", "ko", "zh"},
 	}
 	engines := []Translator{
-		NewFastAITranslator(),
 		NewAITranslator(),
 	}
 	anyOK := false
@@ -63,11 +62,11 @@ func TestLiveEngines(t *testing.T) {
 
 func TestLiveManager(t *testing.T) {
 	m := NewManager()
-	if len(m.engines) != 2 {
-		t.Fatalf("engines = %d, want AI-fast+AI", len(m.engines))
+	if len(m.engines) != 1 {
+		t.Fatalf("engines = %d, want AI", len(m.engines))
 	}
-	if m.engines[0].Name() != "AI-fast" || m.engines[1].Name() != "AI" {
-		t.Fatalf("engine order = %s, %s", m.engines[0].Name(), m.engines[1].Name())
+	if m.engines[0].Name() != "AI" {
+		t.Fatalf("engine = %s", m.engines[0].Name())
 	}
 	ko, err := m.Translate("集合中路", "zh", "ko")
 	if err != nil {
