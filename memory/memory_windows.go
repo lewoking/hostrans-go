@@ -188,19 +188,6 @@ func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
 	return hits, nil
 }
 
-// FilterContains 从候选地址中筛出当前仍以 pattern 开头的位置。
-func (p *Process) FilterContains(addrs []uintptr, pattern []byte) []uintptr {
-	out := make([]uintptr, 0, len(addrs))
-	n := uint(len(pattern))
-	for _, a := range addrs {
-		b, err := p.ReadMemory(a, n)
-		if err == nil && bytes.Equal(b, pattern) {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
 func (p *Process) Alive() bool {
 	if p == nil || p.Handle == 0 {
 		return false

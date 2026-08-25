@@ -98,12 +98,6 @@ func New(trans *translator.Manager) *Monitor {
 	}
 }
 
-func (m *Monitor) Ready() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.buffers) > 0
-}
-
 func (m *Monitor) BufferCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -139,13 +133,6 @@ func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
 	}
 	m.buffers = append(m.buffers, buffer{addr: addr, enc: enc, hangul: true})
 	return true
-}
-
-func (m *Monitor) resetLock() {
-	m.mu.Lock()
-	m.buffers = nil
-	m.lastMine = ""
-	m.mu.Unlock()
 }
 
 func (m *Monitor) proc() *memory.Process {

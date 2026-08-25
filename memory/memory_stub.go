@@ -36,8 +36,4 @@ func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
 	return nil, fmt.Errorf("not supported")
 }
 
-func (p *Process) FilterContains(addrs []uintptr, pattern []byte) []uintptr {
-	return nil
-}
-
 func (p *Process) Alive() bool { return false }
