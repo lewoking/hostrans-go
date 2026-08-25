@@ -274,6 +274,9 @@ func (o *Overlay) Run() error {
 		0, 0, mod, 0,
 	)
 	if hwnd == 0 {
+		t, _ := windows.UTF16PtrFromString("无法创建悬浮窗")
+		c, _ := windows.UTF16PtrFromString("HOSTrans")
+		_, _ = windows.MessageBox(0, t, c, windows.MB_OK|windows.MB_ICONERROR)
 		return err
 	}
 	o.hwnd = hwnd

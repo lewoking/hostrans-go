@@ -14,7 +14,7 @@ flowchart TB
     OV -->|"Ctrl+P 空框"| Loc
 ```
 
-Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 双击后会要管理员。窗口化最大化。加载画面写出 battlelobby 后会提示并自动初始化。Ctrl+P：有中文则译韩，空框则初始化。
+Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 双击后会要管理员。窗口化最大化。新对局写出 battlelobby 后提示并自动初始化（忽略大厅残留旧文件）。Ctrl+P：有中文则译韩，空框则探测定位。日志：`%TEMP%\hostrans.log`。
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .

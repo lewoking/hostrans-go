@@ -2,6 +2,8 @@ package monitor
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"hostrans/memory"
@@ -20,6 +22,15 @@ var chatMarkers = []string{
 	`[Team]`,
 	`[Party]`,
 	`综合 한국어`,
+}
+
+func debugLog(format string, args ...interface{}) {
+	f, err := os.OpenFile(filepath.Join(os.TempDir(), "hostrans.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, time.Now().Format("15:04:05 ")+format+"\n", args...)
 }
 
 func (m *Monitor) AttachIfNeeded() error {
@@ -43,6 +54,7 @@ func (m *Monitor) AttachIfNeeded() error {
 	if old != nil {
 		old.Close()
 	}
+	debugLog("attached pid=%d", pid)
 	return nil
 }
 
@@ -133,6 +145,7 @@ func (m *Monitor) LocatePassive(log func(string)) error {
 	if log != nil && added > 0 {
 		log(fmt.Sprintf("被动定位 +%d，当前监听 %d 处", added, m.BufferCount()))
 	}
+	debugLog("passive locate added=%d total=%d", added, m.BufferCount())
 	return nil
 }
 
@@ -148,103 +161,73 @@ func sleepStop(d time.Duration, stop <-chan struct{}) bool {
 }
 
 func (m *Monitor) initAfterLobby(stop <-chan struct{}, sink Sink) bool {
+	debugLog("battlelobby → init")
 	if sink != nil {
 		sink.Status("检测到对局，即将初始化")
 		sink.Stay()
 	}
-	if !sleepStop(2*time.Second, stop) {
+	// 等加载画面稍稳，期间不要反复扫全堆
+	if !sleepStop(5*time.Second, stop) {
 		return false
 	}
 	m.resetLock()
+	_ = m.AttachIfNeeded()
 
-	for i := 0; i < 8; i++ {
-		if err := m.AttachIfNeeded(); err != nil {
-			if sink != nil {
-				sink.Status("等待游戏进程…")
-				sink.Stay()
-			}
-			if !sleepStop(2*time.Second, stop) {
-				return false
-			}
-			continue
-		}
-		if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
-			if sink != nil {
-				sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
-				sink.Show()
-			}
-			return true
-		}
-		// 加载画面往往还不能打字；多试几次被动扫描后再发探测串
-		if i >= 3 && m.windowReady() {
-			m.mu.Lock()
-			tooSoon := !m.lastProbe.IsZero() && time.Since(m.lastProbe) < 45*time.Second
-			m.mu.Unlock()
-			if !tooSoon {
-				if sink != nil {
-					sink.Status("正在锁定当前界面聊天…")
-					sink.Stay()
-				}
-				err := m.Locate(func(s string) {
-					if sink != nil {
-						sink.Status(s)
-						sink.Stay()
-					}
-				})
-				m.mu.Lock()
-				m.lastProbe = time.Now()
-				m.mu.Unlock()
-				if err == nil && m.BufferCount() > 0 {
-					if sink != nil {
-						sink.Status("初始化完成，开始监控")
-						sink.Show()
-					}
-					return true
-				}
-			}
-		}
+	if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
 		if sink != nil {
-			sink.Status("检测到对局，即将初始化…")
-			sink.Stay()
+			sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
+			sink.Show()
 		}
-		if !sleepStop(2*time.Second, stop) {
-			return false
-		}
+		return true
 	}
+	if !sleepStop(5*time.Second, stop) {
+		return false
+	}
+	if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
+		if sink != nil {
+			sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
+			sink.Show()
+		}
+		return true
+	}
+
+	// 不自动发探测串（会抢键鼠、误发聊天）。空框 Ctrl+P 才探测。
 	if sink != nil {
-		sink.Status("自动初始化未成功，空聊天框按 Ctrl+P")
-		sink.Stay()
+		sink.Status("检测到对局。打开空聊天框按 Ctrl+P 初始化")
+		sink.Show()
 	}
+	debugLog("auto init: passive miss, wait Ctrl+P")
 	return true
 }
 
-// AutoInit 借鉴 HotsStats：轮询 battlelobby 文件。
-// 加载画面写出 replay.server.battlelobby 即视为新对局，提示后自动初始化。
+// AutoInit 借鉴 HotsStats：轮询 battlelobby。
+// 只在「新写出/mtime 变化」时触发，忽略启动时已经存在的旧文件。
 func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 	var lastMod time.Time
+	watching := false
 	for {
 		_ = m.AttachIfNeeded()
 		m.pruneDead()
 
 		mt, ok := battleLobbyModTime()
 		if !ok {
+			watching = false
 			lastMod = time.Time{}
+		} else if !watching {
+			watching = true
+			lastMod = mt
+			// 启动时就在加载画面（文件很新）才立刻跟；大厅残留的旧文件忽略
+			if isFreshLobby(mt, 90*time.Second) {
+				if !m.initAfterLobby(stop, sink) {
+					return
+				}
+			} else {
+				debugLog("ignore stale battlelobby age=%s", time.Since(mt))
+			}
 		} else if !mt.Equal(lastMod) {
 			lastMod = mt
 			if !m.initAfterLobby(stop, sink) {
 				return
-			}
-			continue
-		}
-
-		if m.BufferCount() == 0 {
-			if sink != nil {
-				if ok {
-					sink.Status("对局进行中，空聊天框按 Ctrl+P 初始化")
-				} else {
-					sink.Status("等待进入对局…")
-				}
-				sink.Stay()
 			}
 		}
 

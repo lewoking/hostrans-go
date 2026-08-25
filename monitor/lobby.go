@@ -19,3 +19,12 @@ func battleLobbyModTime() (time.Time, bool) {
 	}
 	return fi.ModTime(), true
 }
+
+// isFreshLobby 启动时已存在的旧文件不算新对局（HotsStats 用 mtime 变化区分）。
+func isFreshLobby(mt time.Time, maxAge time.Duration) bool {
+	if mt.IsZero() {
+		return false
+	}
+	age := time.Since(mt)
+	return age >= 0 && age < maxAge
+}
