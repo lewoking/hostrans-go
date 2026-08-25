@@ -1,5 +1,6 @@
 # Binaries
 *.exe
+.venv-img/
 *.exe~
 *.dll
 *.so

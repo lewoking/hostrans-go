@@ -17,6 +17,7 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 空聊天框 Ctrl+P：初始化
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
+- 托盘图标退出，或再次运行 / `hostrans.exe --quit`
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .

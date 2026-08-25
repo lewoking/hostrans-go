@@ -16,6 +16,12 @@ import (
 func main() {
 	if runtime.GOOS == "windows" {
 		memory.ElevateIfNeeded()
+		if memory.WantQuit() {
+			if err := memory.RequestQuit(); err != nil {
+				os.Exit(1)
+			}
+			return
+		}
 		if err := memory.EnsureSingleInstance(); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -43,10 +49,14 @@ func main() {
 		ov.Show()
 	}
 
+	qh, _ := memory.CreateQuitEvent()
+	defer memory.CloseQuitEvent(qh)
+
 	stop := make(chan struct{})
 	go mon.RunTranslator(stop, ov)
 	go mon.AutoInit(stop, ov)
 	go mon.Loop(800*time.Millisecond, ov, stop)
+	go memory.WaitQuit(qh, ov.Close)
 	_ = ov.Run()
 	close(stop)
 	mon.CloseProc()

@@ -230,13 +230,16 @@ func (o *Overlay) Run() error {
 	title, _ := windows.UTF16PtrFromString("HOSTrans")
 	mod, _, _ := procGetModuleHandleW.Call(0)
 	cursor, _, _ := procLoadCursorW.Call(0, idcArrow)
+	appIcon := loadAppIcon(mod)
 
 	wc := wndClassEx{
 		Size:       uint32(unsafe.Sizeof(wndClassEx{})),
 		WndProc:    wndProcCB,
 		Instance:   windows.Handle(mod),
+		Icon:       windows.Handle(appIcon),
 		Cursor:     windows.Handle(cursor),
 		ClassName:  className,
+		IconSm:     windows.Handle(appIcon),
 		Background: 0,
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
@@ -279,6 +282,7 @@ func (o *Overlay) Run() error {
 	modFlags := uintptr(modControl | modNoRepeat)
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
+	startTray(func() { o.Close() })
 
 	o.Status("等待游戏")
 	o.Status("P=译韩/空=初始化")
@@ -293,6 +297,7 @@ func (o *Overlay) Run() error {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
+	stopTray()
 	procUnregisterHotKey.Call(hwnd, hotShow)
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
 	if o.fontChat != 0 {
@@ -338,6 +343,11 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 			if o.OnTranslateInput != nil {
 				go o.OnTranslateInput()
 			}
+		}
+		return 0
+	case wmTray:
+		if lParam == wmRButtonUp || lParam == wmLButtonUp {
+			showTrayMenu(hwnd)
 		}
 		return 0
 	case wmAppRedraw:

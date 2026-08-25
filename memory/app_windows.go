@@ -5,9 +5,12 @@ package memory
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
+
+const quitEventName = "Local\\HOSTransGo.Quit"
 
 var instanceMu windows.Handle
 
@@ -31,7 +34,11 @@ func ElevateIfNeeded() {
 	}
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, _ := windows.UTF16PtrFromString(exe)
-	if err := windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL); err != nil {
+	var params *uint16
+	if len(os.Args) > 1 {
+		params, _ = windows.UTF16PtrFromString(strings.Join(os.Args[1:], " "))
+	}
+	if err := windows.ShellExecute(0, verb, file, params, nil, windows.SW_SHOWNORMAL); err != nil {
 		return
 	}
 	os.Exit(0)
@@ -46,10 +53,49 @@ func EnsureSingleInstance() error {
 	h, err := windows.CreateMutex(nil, false, name)
 	instanceMu = h
 	if err == windows.ERROR_ALREADY_EXISTS {
-		t, _ := windows.UTF16PtrFromString("HOSTrans 已在运行")
+		t, _ := windows.UTF16PtrFromString("HOSTrans 已在运行。是否退出？")
 		c, _ := windows.UTF16PtrFromString("HOSTrans")
-		_, _ = windows.MessageBox(0, t, c, windows.MB_OK|windows.MB_ICONINFORMATION)
+		r, _ := windows.MessageBox(0, t, c, windows.MB_YESNO|windows.MB_ICONQUESTION)
+		if r == 6 { // IDYES
+			_ = RequestQuit()
+		}
 		return fmt.Errorf("已有实例在运行")
 	}
 	return err
+}
+
+func CreateQuitEvent() (QuitHandle, error) {
+	name, err := windows.UTF16PtrFromString(quitEventName)
+	if err != nil {
+		return 0, err
+	}
+	h, err := windows.CreateEvent(nil, 1, 0, name)
+	return QuitHandle(h), err
+}
+
+func CloseQuitEvent(h QuitHandle) {
+	if h != 0 {
+		_ = windows.CloseHandle(windows.Handle(h))
+	}
+}
+
+func RequestQuit() error {
+	name, err := windows.UTF16PtrFromString(quitEventName)
+	if err != nil {
+		return err
+	}
+	h, err := windows.OpenEvent(windows.EVENT_MODIFY_STATE, false, name)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	return windows.SetEvent(h)
+}
+
+func WaitQuit(h QuitHandle, onQuit func()) {
+	if h == 0 || onQuit == nil {
+		return
+	}
+	_, _ = windows.WaitForSingleObject(windows.Handle(h), windows.INFINITE)
+	onQuit()
 }
