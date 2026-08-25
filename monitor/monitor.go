@@ -356,12 +356,9 @@ func (m *Monitor) Loop(d time.Duration, sink Sink, stop <-chan struct{}) {
 	}
 }
 
-func (m *Monitor) TranslateInput(log func(string)) {
+func (m *Monitor) TranslateInput(sink Sink) {
 	p := m.proc()
 	if p == nil {
-		if log != nil {
-			log("游戏未连接")
-		}
 		return
 	}
 	oldClip, clipErr := memory.GetClipboardText()
@@ -375,48 +372,40 @@ func (m *Monitor) TranslateInput(log func(string)) {
 		src = ""
 	}
 	src = trimChat(src)
-	debugLog("input capture src=%q kind=%v err=%v", src, memory.ClassifyInput(src), err)
-	switch memory.ClassifyInput(src) {
+	kind := memory.ClassifyInput(src)
+	debugLog("input capture src=%q kind=%v err=%v", src, kind, err)
+	switch kind {
 	case memory.InputEmpty, memory.InputOther:
-		if log != nil {
-			log("空框，初始化…")
-		}
-		if err := m.Locate(log); err != nil {
+		if err := m.Locate(nil); err != nil {
 			debugLog("manual locate: %v", err)
-			if log != nil {
-				log(err.Error())
-			}
 		}
 		return
 	case memory.InputKorean:
-		// 输入框里的韩文等发出去后由监控翻译；这里不拿来初始化
-		if log != nil {
-			log("韩文发出后会自动译")
+		zh, err := m.Trans.Translate(src, "ko", "zh")
+		if err != nil || zh == "" || looksLikeFailure(zh) {
+			debugLog("ko→zh input fail src=%q err=%v dst=%q", src, err, zh)
+			return
+		}
+		debugLog("ko→zh input src=%q dst=%q", src, zh)
+		if sink != nil {
+			sink.Push("我", zh)
+			sink.Show()
 		}
 		return
 	}
 	dst, err := m.Trans.Translate(src, "zh", "ko")
 	if err != nil {
 		debugLog("zh→ko fail src=%q err=%v", src, err)
-		if log != nil {
-			log("翻译失败: " + err.Error())
-		}
 		return
 	}
 	debugLog("zh→ko src=%q dst=%q", src, dst)
 	if err := memory.TranslateChatBox(p.PID, dst); err != nil {
 		debugLog("fill-back fail: %v", err)
-		if log != nil {
-			log("回填失败: " + err.Error())
-		}
 		return
 	}
 	m.mu.Lock()
 	m.lastMine = dst
 	m.mu.Unlock()
-	if log != nil {
-		log("已译韩: " + dst)
-	}
 }
 
 func trimChat(s string) string {

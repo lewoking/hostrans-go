@@ -38,7 +38,7 @@ func main() {
 		fmt.Println("未取得管理员权限，内存读取可能失败。")
 	}
 
-	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩（空框则初始化）")
+	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩 / 韩译中（空框则初始化）")
 	dlog.Infof("start version=%s debug=%v admin=%v log=%s", dlog.Version, dlog.DebugEnabled(dlog.Version), memory.IsAdmin(), dlog.Path())
 
 	memory.EnableDebugPrivilege()
@@ -48,7 +48,7 @@ func main() {
 
 	ov.OnTranslateInput = func() {
 		ov.Stay()
-		mon.TranslateInput(nil)
+		mon.TranslateInput(ov)
 		ov.Show()
 	}
 

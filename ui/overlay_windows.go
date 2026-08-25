@@ -472,5 +472,5 @@ func (o *Overlay) paint(hwnd uintptr) {
 		}
 		y += h1 + 6
 	}
-	draw(o.fontHint, 14, winH-22, winW-28, 14, teamBlue, "P译韩 空初始化")
+	draw(o.fontHint, 14, winH-22, winW-28, 14, teamBlue, "P中↔韩 空初始化")
 }
