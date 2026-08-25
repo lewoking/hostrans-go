@@ -42,7 +42,9 @@ func main() {
 	dlog.Infof("start version=%s debug=%v admin=%v log=%s", dlog.Version, dlog.DebugEnabled(dlog.Version), memory.IsAdmin(), dlog.Path())
 
 	memory.EnableDebugPrivilege()
-	mon := monitor.New(translator.NewManager())
+	trans := translator.NewManager()
+	go trans.Warmup()
+	mon := monitor.New(trans)
 	ov := ui.NewOverlay()
 	ov.Status("日志 " + dlog.Path() + "  " + dlog.Version)
 

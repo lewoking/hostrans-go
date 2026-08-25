@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,6 +55,23 @@ func newSeen() *seenSet {
 	return &seenSet{m: make(map[string]struct{})}
 }
 
+func (s *seenSet) Has(x string) bool {
+	_, ok := s.m[x]
+	return ok
+}
+
+func (s *seenSet) CoveredBy(x string) bool {
+	if x == "" {
+		return false
+	}
+	for _, old := range s.q {
+		if len(old) > len(x) && strings.Contains(old, x) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *seenSet) Add(x string) bool {
 	if x == "" {
 		return true
@@ -76,7 +94,7 @@ func New(trans *translator.Manager) *Monitor {
 		Trans:  trans,
 		probes: make(map[string]struct{}),
 		seen:   newSeen(),
-		jobs:   make(chan translateJob, 24),
+		jobs:   make(chan translateJob, 32),
 	}
 }
 
@@ -300,6 +318,9 @@ func (m *Monitor) emitLine(line memory.ChatLine, lastMine string, probes map[str
 	if lastMine != "" && body == lastMine {
 		return
 	}
+	if m.seen.Has(body) || m.seen.CoveredBy(body) {
+		return
+	}
 	if m.seen.Add(body) {
 		return
 	}
@@ -314,24 +335,39 @@ func (m *Monitor) emitLine(line memory.ChatLine, lastMine string, probes map[str
 	}
 }
 
-// RunTranslator 独立协程翻译，避免 HTTP 堵住 0.8s 内存轮询。
+// RunTranslator 多工人并行译不同句子。同一句仍是引擎赛跑。
 func (m *Monitor) RunTranslator(stop <-chan struct{}, sink Sink) {
-	for {
-		select {
-		case <-stop:
-			return
-		case job := <-m.jobs:
-			zh, err := m.Trans.Translate(job.body, "auto", "zh")
-			if err != nil || zh == "" || looksLikeFailure(zh) {
-				debugLog("ko→zh fail speaker=%q body=%q err=%v dst=%q", job.speaker, job.body, err, zh)
-				continue
-			}
-			if sink != nil {
-				sink.Push(job.speaker, zh)
-				sink.Show()
-			}
-		}
+	m.RunTranslators(4, stop, sink)
+}
+
+func (m *Monitor) RunTranslators(n int, stop <-chan struct{}, sink Sink) {
+	if n < 1 {
+		n = 1
 	}
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				case job := <-m.jobs:
+					zh, err := m.Trans.Translate(job.body, "auto", "zh")
+					if err != nil || zh == "" || looksLikeFailure(zh) {
+						debugLog("ko→zh fail speaker=%q body=%q err=%v dst=%q", job.speaker, job.body, err, zh)
+						continue
+					}
+					if sink != nil {
+						sink.Push(job.speaker, zh)
+						sink.Show()
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func looksLikeFailure(s string) bool {

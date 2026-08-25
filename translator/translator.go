@@ -293,10 +293,18 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		engines: []Translator{
+			NewFastAITranslator(),
 			NewAITranslator(),
-			NewDeepLXTranslator(""),
 		},
 		cache: make(map[string]string),
+	}
+}
+
+func (m *Manager) Warmup() {
+	for _, eng := range m.engines {
+		if a, ok := eng.(*AITranslator); ok {
+			a.Warmup()
+		}
 	}
 }
 

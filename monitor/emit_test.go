@@ -19,4 +19,10 @@ func TestEmitSkipsGarbageAndKeepsChat(t *testing.T) {
 	default:
 		t.Fatal("expected korean chat")
 	}
+	m.emit("이 수 없다", "", nil, nil)
+	select {
+	case j := <-m.jobs:
+		t.Fatalf("queued fragment %q", j.body)
+	default:
+	}
 }

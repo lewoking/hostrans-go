@@ -30,6 +30,24 @@ func TestBuildAIInput(t *testing.T) {
 	}
 }
 
+func TestParseChatCompletions(t *testing.T) {
+	raw := []byte(`{"choices":[{"message":{"content":"大王来了"}}]}`)
+	got, err := parseChatCompletions(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "大王来了" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNewManagerEngines(t *testing.T) {
+	m := NewManager()
+	if len(m.engines) != 2 || m.engines[0].Name() != "AI-fast" || m.engines[1].Name() != "AI" {
+		t.Fatalf("engines=%v", m.engines)
+	}
+}
+
 func TestAITranslatorNotReadyWithoutKey(t *testing.T) {
 	old := AIKey
 	AIKey = ""
