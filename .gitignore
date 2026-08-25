@@ -18,6 +18,10 @@ hostrans-386.exe
 go.work
 go.work.sum
 
+# Local build secrets (never commit)
+.secrets
+.secrets.*
+
 # IDE / OS
 .DS_Store
 .idea/

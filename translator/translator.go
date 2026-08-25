@@ -293,7 +293,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		engines: []Translator{
-			NewGoogleTranslator(),
+			NewAITranslator(),
 			NewDeepLXTranslator(""),
 		},
 		cache: make(map[string]string),

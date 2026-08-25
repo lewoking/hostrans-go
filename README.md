@@ -1,6 +1,6 @@
 # HOSTrans
 
-风暴英雄韩服聊天翻译 · **无 Key · 开箱即用 · 单文件**
+风暴英雄韩服聊天翻译 · **开箱即用 · 单文件**
 
 ```mermaid
 flowchart TB
@@ -20,8 +20,11 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
 - 托盘图标退出（Win11 可能在任务栏 `^` 隐藏图标里），或再次运行 / `hostrans.exe --quit`
+- 翻译：AI（gpt-5.6-luna）与 DeepLX 并发，先返回的有效译文胜出
 - 排查日志：`%TEMP%\hostrans.log`（悬浮窗显示路径）。**v1.0.0 前默认 debug**，正式版只留 info
 
+密钥不进源码。本地把 `HOSTTRANS_AI_KEY` 写在 gitignore 的 `.secrets`，再构建：
+
 ```bash
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui -X hostrans/dlog.Version=v0.5.4" -o hostrans.exe .
+./scripts/build-windows.sh v0.6.0
 ```
