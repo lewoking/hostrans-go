@@ -21,8 +21,3 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 悬浮窗显示韩语发言的中文译文
 
 
-密钥不进源码。本地把 `HOSTTRANS_AI_KEY` 写在 gitignore 的 `.secrets`，再构建：
-
-```bash
-./scripts/build-windows.sh v0.6.0
-```
