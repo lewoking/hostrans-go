@@ -44,6 +44,7 @@ func main() {
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())
 	ov := ui.NewOverlay()
+	ov.Status("日志 " + dlog.Path())
 
 	ov.OnTranslateInput = func() {
 		ov.Stay()
