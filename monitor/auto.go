@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"hostrans/dlog"
@@ -23,6 +24,19 @@ var chatMarkers = []string{
 	`[Team]`,
 	`[Party]`,
 	`综合 한국어`,
+}
+
+func clipLog(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '	' || r >= 32 {
+			return r
+		}
+		return -1
+	}, s)
+	if len([]rune(s)) > 80 {
+		return string([]rune(s)[:80]) + "…"
+	}
+	return s
 }
 
 func debugLog(format string, args ...interface{}) {
@@ -145,11 +159,12 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 		enc := encs[i]
 		for _, addr := range addrs {
 			raw, rerr := p.ReadString(addr, 1024, enc)
-			if rerr != nil || memory.IsChannelPrefixOnly(raw) {
+			if rerr != nil || !memory.LooksLikeChat(raw) {
 				continue
 			}
 			if m.addBuffer(enc, addr) {
 				added++
+				debugLog("passive keep enc=%s addr=%x raw=%q", enc, addr, clipLog(raw))
 			}
 		}
 	}
@@ -201,7 +216,7 @@ func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 			}
 			lastCount = n
 		}
-		wait := 8 * time.Second
+		wait := 20 * time.Second
 		if m.BufferCount() == 0 {
 			wait = 3 * time.Second
 		}

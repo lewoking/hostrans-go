@@ -34,10 +34,17 @@ func NewAITranslator() *AITranslator {
 		model = "gpt-5.6-luna"
 	}
 	return &AITranslator{
-		client: &http.Client{Timeout: 20 * time.Second},
-		base:   base,
-		model:  model,
-		key:    strings.TrimSpace(AIKey),
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        4,
+				MaxIdleConnsPerHost: 4,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+		base:  base,
+		model: model,
+		key:   strings.TrimSpace(AIKey),
 	}
 }
 
@@ -68,8 +75,9 @@ func buildAIInput(text, from, to string) string {
 }
 
 type responsesReq struct {
-	Model string `json:"model"`
-	Input string `json:"input"`
+	Model           string `json:"model"`
+	Input           string `json:"input"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
 }
 
 type responsesResp struct {
@@ -116,8 +124,9 @@ func (a *AITranslator) Translate(text, from, to string) (string, error) {
 		return "", fmt.Errorf("未注入翻译密钥")
 	}
 	payload, err := json.Marshal(responsesReq{
-		Model: a.model,
-		Input: buildAIInput(text, from, to),
+		Model:           a.model,
+		Input:           buildAIInput(text, from, to),
+		MaxOutputTokens: 64,
 	})
 	if err != nil {
 		return "", err

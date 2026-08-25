@@ -58,7 +58,7 @@ func main() {
 	stop := make(chan struct{})
 	go mon.RunTranslator(stop, ov)
 	go mon.AutoInit(stop, ov)
-	go mon.Loop(800*time.Millisecond, ov, stop)
+	go mon.Loop(400*time.Millisecond, ov, stop)
 	go memory.WaitQuit(qh, ov.Close)
 	_ = ov.Run()
 	close(stop)

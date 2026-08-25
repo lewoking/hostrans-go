@@ -19,10 +19,11 @@ type Sink interface {
 }
 
 type buffer struct {
-	addr uintptr
-	enc  string
-	last string
-	fail int
+	addr   uintptr
+	enc    string
+	last   string
+	fail   int
+	hangul bool
 }
 
 type translateJob struct {
@@ -108,9 +109,17 @@ func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
 		}
 	}
 	if len(m.buffers) >= 16 {
-		m.buffers = m.buffers[1:]
+		// 优先丢掉还没见过韩文的槽，避免输入框前缀占满
+		drop := 0
+		for i, b := range m.buffers {
+			if !b.hangul {
+				drop = i
+				break
+			}
+		}
+		m.buffers = append(m.buffers[:drop], m.buffers[drop+1:]...)
 	}
-	m.buffers = append(m.buffers, buffer{addr: addr, enc: enc})
+	m.buffers = append(m.buffers, buffer{addr: addr, enc: enc, hangul: true})
 	return true
 }
 
@@ -237,10 +246,17 @@ func (m *Monitor) Tick(sink Sink) {
 			continue
 		}
 		bufs[i].fail = 0
+		// 多读一段，同一页里新冒出来的韩文也能抓到，不必等下一轮全堆扫描
+		if win, werr := p.ReadMemory(bufs[i].addr, 2048); werr == nil && len(win) > 0 {
+			raw = string(win)
+		}
 		if raw == "" || raw == bufs[i].last {
 			continue
 		}
 		bufs[i].last = raw
+		if memory.LooksLikeChat(raw) || memory.ContainsKorean(raw) {
+			bufs[i].hangul = true
+		}
 		changed = true
 		m.emit(raw, lastMine, probes, sink)
 	}
@@ -258,6 +274,7 @@ func (m *Monitor) Tick(sink Sink) {
 	for _, b := range m.buffers {
 		if u, ok := byKey[fmt.Sprintf("%s:%x", b.enc, b.addr)]; ok {
 			b.last, b.fail = u.last, u.fail
+			b.hangul = b.hangul || u.hangul
 		}
 		if b.fail < 3 {
 			alive = append(alive, b)
@@ -267,26 +284,23 @@ func (m *Monitor) Tick(sink Sink) {
 }
 
 func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Sink) {
-	if memory.IsChannelPrefixOnly(raw) {
-		return
+	for _, line := range memory.ChatCandidates(raw) {
+		m.emitLine(line, lastMine, probes, sink)
 	}
-	line := memory.ParseChatLine(raw)
+}
+
+func (m *Monitor) emitLine(line memory.ChatLine, lastMine string, probes map[string]struct{}, sink Sink) {
 	if memory.ShouldSkip(line, probes) {
 		return
 	}
 	body := line.Text
-	if !memory.NeedsTranslate(body) && memory.ContainsKorean(raw) {
-		if body == "" {
-			body = raw
-		}
-	}
 	if body == "" {
 		return
 	}
-	if lastMine != "" && (body == lastMine || raw == lastMine) {
+	if lastMine != "" && body == lastMine {
 		return
 	}
-	if m.seen.Add(raw) {
+	if m.seen.Add(body) {
 		return
 	}
 	if !memory.NeedsTranslate(body) {
