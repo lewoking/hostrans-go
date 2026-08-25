@@ -267,6 +267,12 @@ func (m *Monitor) Tick(sink Sink) {
 		// 多读一段，同一页里新冒出来的韩文也能抓到，不必等下一轮全堆扫描
 		if win, werr := p.ReadMemory(bufs[i].addr, 2048); werr == nil && len(win) > 0 {
 			raw = string(win)
+			const back = 256
+			if bufs[i].addr > back {
+				if pre, perr := p.ReadMemory(bufs[i].addr-back, back); perr == nil && len(pre) > 0 {
+					raw = string(append(pre, win...))
+				}
+			}
 		}
 		if raw == "" || raw == bufs[i].last {
 			continue

@@ -78,13 +78,20 @@ func ChatCandidates(raw string) []ChatLine {
 		blobs = []string{raw}
 	}
 	var out []ChatLine
-	seen := map[string]struct{}{}
+	idx := map[string]int{}
+	lastName := ""
 	for _, blob := range blobs {
 		for _, piece := range splitLines(blob) {
+			line := ParseChatLine(piece)
+			if line.Speaker != "" {
+				lastName = line.Speaker
+			} else if looksLikeName(piece) {
+				lastName = piece
+				continue
+			}
 			if !LooksLikeChat(piece) {
 				continue
 			}
-			line := ParseChatLine(piece)
 			body := line.Text
 			if body == "" {
 				body = piece
@@ -95,17 +102,40 @@ func ChatCandidates(raw string) []ChatLine {
 			if body == "" {
 				continue
 			}
-			if _, ok := seen[body]; ok {
-				continue
+			if line.Speaker == "" && lastName != "" {
+				line.Speaker = lastName
 			}
-			seen[body] = struct{}{}
 			if line.Text == "" {
 				line.Text = body
 			}
+			if i, ok := idx[body]; ok {
+				if out[i].Speaker == "" && line.Speaker != "" {
+					out[i] = line
+				}
+				continue
+			}
+			idx[body] = len(out)
 			out = append(out, line)
 		}
 	}
 	return out
+}
+
+func looksLikeName(s string) bool {
+	s = strings.TrimSpace(stripTags(s))
+	if !isSpeaker(s) {
+		return false
+	}
+	if channelRe.MatchString(s) {
+		return false
+	}
+	if strings.ContainsAny(s, ":： 	") {
+		return false
+	}
+	if ContainsKorean(s) && (utf8.RuneCountInString(s) > 8 || strings.ContainsAny(s, ".,!?，。！？")) {
+		return false
+	}
+	return true
 }
 
 func splitLines(s string) []string {

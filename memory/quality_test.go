@@ -65,3 +65,26 @@ func TestChatCandidatesFindsHangulNotPrefix(t *testing.T) {
 		t.Fatalf("cands=%+v", cands)
 	}
 }
+
+func TestChatCandidatesAttachesNeighborName(t *testing.T) {
+	raw := "[团队]:\x00honghuli\x00대왕이 왔어"
+	cands := ChatCandidates(raw)
+	if len(cands) != 1 || cands[0].Speaker != "honghuli" || cands[0].Text != "대왕이 왔어" {
+		t.Fatalf("cands=%+v", cands)
+	}
+}
+
+func TestChatCandidatesPrefersNamedDuplicate(t *testing.T) {
+	raw := "[团队]: 아니요, 감사합니다.\x00honghuli: 아니요, 감사합니다."
+	cands := ChatCandidates(raw)
+	if len(cands) != 1 || cands[0].Speaker != "honghuli" {
+		t.Fatalf("cands=%+v", cands)
+	}
+}
+
+func TestDisplaySpeakerOmitsChannel(t *testing.T) {
+	line := ParseChatLine("[团队]: 대왕이 왔어")
+	if DisplaySpeaker(line) != "" {
+		t.Fatalf("speaker=%q", DisplaySpeaker(line))
+	}
+}

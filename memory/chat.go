@@ -159,8 +159,5 @@ func DisplaySpeaker(line ChatLine) string {
 	if line.Speaker != "" {
 		return line.Speaker
 	}
-	if line.Channel != "" {
-		return line.Channel
-	}
-	return "?"
+	return ""
 }
