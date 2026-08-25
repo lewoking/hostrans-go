@@ -146,7 +146,7 @@ func (m *Monitor) Locate(log func(string)) error {
 		m.probes[probe] = struct{}{}
 		m.mu.Unlock()
 		if log != nil {
-			log(fmt.Sprintf("发送探测 %d/3: %s", i+1, probe))
+			log(fmt.Sprintf("探测 %d/3", i+1))
 		}
 		if err := memory.SendChat(p.PID, probe); err != nil {
 			return err
@@ -168,10 +168,10 @@ func (m *Monitor) Locate(log func(string)) error {
 			utf16Hits = p.FilterContains(utf16Hits, p16)
 		}
 		if log != nil {
-			log(fmt.Sprintf("候选 utf-8=%d  utf-16le=%d", len(utf8Hits), len(utf16Hits)))
+			log(fmt.Sprintf("命中 %d/%d", len(utf8Hits), len(utf16Hits)))
 		}
 		if len(utf8Hits) == 0 && len(utf16Hits) == 0 {
-			return fmt.Errorf("未扫到探测串，请确认当前界面能打字")
+			return fmt.Errorf("探测失败")
 		}
 	}
 	enc, addr, err := pickAddr(utf8Hits, utf16Hits)
@@ -181,7 +181,7 @@ func (m *Monitor) Locate(log func(string)) error {
 	added := m.addBuffer(enc, addr)
 	if log != nil {
 		if added {
-			log(fmt.Sprintf("已监听 %s@0x%X（当前共 %d 处，含选人/局内）", enc, addr, m.BufferCount()))
+			log(fmt.Sprintf("已监听 %d 处", m.BufferCount()))
 		} else {
 			log("当前场景已在监听")
 		}
@@ -205,7 +205,7 @@ func pickAddr(utf8Hits, utf16Hits []uintptr) (string, uintptr, error) {
 			return o.enc, o.addrs[0], nil
 		}
 	}
-	return "", 0, fmt.Errorf("初始化失败：请在能打字的界面重试（选人或局内）")
+	return "", 0, fmt.Errorf("初始化失败")
 }
 
 func (m *Monitor) Tick(sink Sink) {
@@ -355,7 +355,7 @@ func (m *Monitor) TranslateInput(log func(string)) {
 	// 输入框空/没有中文：当作初始化（原 Ctrl+1）
 	if src == "" || !memory.ContainsHan(src) {
 		if log != nil {
-			log("输入框无可译中文，开始初始化…")
+			log("空框，初始化…")
 		}
 		if err := m.Locate(log); err != nil {
 			if log != nil {

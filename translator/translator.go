@@ -1,6 +1,7 @@
 package translator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,17 @@ import (
 	"time"
 	"unicode/utf8"
 )
+
+func rejectNonJSON(data []byte) error {
+	s := bytes.TrimSpace(data)
+	if len(s) == 0 {
+		return fmt.Errorf("空响应")
+	}
+	if s[0] == '<' {
+		return fmt.Errorf("接口不可用")
+	}
+	return nil
+}
 
 // Translator 接口
 type Translator interface {
@@ -74,11 +86,13 @@ func (m *MicrosoftTranslator) Translate(text, from, to string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	if tok := fetchEdgeToken(m.client); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/120.0.0.0")
+	tok := fetchEdgeToken(m.client)
+	if tok == "" {
+		return "", fmt.Errorf("无 token")
 	}
+	req.Header.Set("Authorization", "Bearer "+tok)
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -86,9 +100,12 @@ func (m *MicrosoftTranslator) Translate(text, from, to string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err := rejectNonJSON(data); err != nil {
+		return "", err
+	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("microsoft %d: %s", resp.StatusCode, string(data))
+		return "", fmt.Errorf("http %d", resp.StatusCode)
 	}
 
 	var result []struct {
@@ -97,7 +114,7 @@ func (m *MicrosoftTranslator) Translate(text, from, to string) (string, error) {
 		} `json:"translations"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("解析失败")
 	}
 	if len(result) == 0 || len(result[0].Translations) == 0 {
 		return "", fmt.Errorf("empty microsoft result")
@@ -147,14 +164,17 @@ func (d *DeepLXTranslator) Translate(text, from, to string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err := rejectNonJSON(data); err != nil {
+		return "", err
+	}
 	var result struct {
 		Code    int    `json:"code"`
 		Data    string `json:"data"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("deeplx parse: %v", err)
+		return "", fmt.Errorf("解析失败")
 	}
 	if result.Code != 200 {
 		return "", fmt.Errorf("deeplx code %d: %s", result.Code, result.Message)
@@ -200,7 +220,10 @@ func (y *YoudaoTranslator) Translate(text, from, to string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	data, _ := io.ReadAll(resp.Body)
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err := rejectNonJSON(data); err != nil {
+		return "", err
+	}
 	var result struct {
 		TranslateResult [][]struct {
 			Tgt string `json:"tgt"`
@@ -209,7 +232,7 @@ func (y *YoudaoTranslator) Translate(text, from, to string) (string, error) {
 		ErrorCode string `json:"errorCode"`
 	}
 	if err := json.Unmarshal(data, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("解析失败")
 	}
 	if result.ErrorCode != "0" && result.ErrorCode != "" {
 		return "", fmt.Errorf("youdao errorCode %s", result.ErrorCode)
@@ -218,6 +241,79 @@ func (y *YoudaoTranslator) Translate(text, from, to string) (string, error) {
 		return "", fmt.Errorf("empty youdao result")
 	}
 	return result.TranslateResult[0][0].Tgt, nil
+}
+
+// ==================== Google 公共接口（无 Key） ====================
+type GoogleTranslator struct {
+	client *http.Client
+}
+
+func NewGoogleTranslator() *GoogleTranslator {
+	return &GoogleTranslator{client: &http.Client{Timeout: 8 * time.Second}}
+}
+
+func (g *GoogleTranslator) Name() string { return "Google" }
+
+func googleLang(lang string) string {
+	switch strings.ToLower(lang) {
+	case "zh", "zh-cn", "zh-hans", "chinese":
+		return "zh-CN"
+	case "ko", "kor", "korean":
+		return "ko"
+	case "en", "eng", "english":
+		return "en"
+	case "auto", "":
+		return "auto"
+	default:
+		return lang
+	}
+}
+
+func (g *GoogleTranslator) Translate(text, from, to string) (string, error) {
+	q := url.Values{}
+	q.Set("client", "gtx")
+	q.Set("sl", googleLang(from))
+	q.Set("tl", googleLang(to))
+	q.Set("dt", "t")
+	q.Set("q", text)
+	api := "https://translate.googleapis.com/translate_a/single?" + q.Encode()
+	req, err := http.NewRequest("GET", api, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err := rejectNonJSON(data); err != nil {
+		return "", err
+	}
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http %d", resp.StatusCode)
+	}
+	var root []interface{}
+	if err := json.Unmarshal(data, &root); err != nil || len(root) == 0 {
+		return "", fmt.Errorf("解析失败")
+	}
+	outer, _ := root[0].([]interface{})
+	var b strings.Builder
+	for _, part := range outer {
+		row, _ := part.([]interface{})
+		if len(row) == 0 {
+			continue
+		}
+		if s, ok := row[0].(string); ok {
+			b.WriteString(s)
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "", fmt.Errorf("empty")
+	}
+	return out, nil
 }
 
 func langMap(lang string) string {
@@ -246,6 +342,7 @@ type Manager struct {
 func NewManager() *Manager {
 	return &Manager{
 		engines: []Translator{
+			NewGoogleTranslator(),
 			NewMicrosoftTranslator(),
 			NewDeepLXTranslator(""),
 			NewYoudaoTranslator(),
@@ -296,9 +393,12 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 			m.mu.Unlock()
 			return result, nil
 		}
-		lastErr = fmt.Errorf("%s: %v", eng.Name(), err)
+		lastErr = err
 	}
-	return "", fmt.Errorf("全部引擎失败: %v", lastErr)
+	if lastErr != nil {
+		return "", fmt.Errorf("翻译失败")
+	}
+	return "", fmt.Errorf("翻译失败")
 }
 
 func (m *Manager) Name() string {

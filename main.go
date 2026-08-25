@@ -31,7 +31,7 @@ func main() {
 		fmt.Println("未取得管理员权限，内存读取可能失败。")
 	}
 
-	fmt.Println("窗口化最大化  ·  检测到对局后自动初始化  ·  Ctrl+P 中译韩（空框则初始化）")
+	fmt.Println("窗口化最大化  ·  Ctrl+P 中译韩（空框则初始化）")
 
 	memory.EnableDebugPrivilege()
 	mon := monitor.New(translator.NewManager())

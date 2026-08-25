@@ -4,17 +4,19 @@
 
 ```mermaid
 flowchart TB
-    Start(["hostrans.exe 管理员运行"]) --> Wait["等待对局"]
-    Wait -->|battlelobby 文件出现| Tip["检测到对局，即将初始化"]
-    Tip --> Loc["定位聊天缓冲"]
-    Loc --> Poll["监听发言"]
+    Start(["hostrans.exe"]) --> Wait["等待游戏"]
+    Wait -->|"空聊天框 Ctrl+P"| Loc["回车→输入探测→回车"]
+    Loc --> Poll["监听韩语发言"]
     Poll --> ZH["说话人：中文译文"]
-    ZH --> OV[透明置顶窗]
-    OV -->|"Ctrl+P 有中文"| Paste["输入框 中 → 韩"]
-    OV -->|"Ctrl+P 空框"| Loc
+    ZH --> OV["透明常驻悬浮窗"]
+    OV -->|"Ctrl+P 有中文"| Paste["回车开框后 Unicode 输入韩文"]
 ```
 
-Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 双击后会要管理员。窗口化最大化。新对局写出 battlelobby 后提示并自动初始化（忽略大厅残留旧文件）。Ctrl+P：有中文则译韩，空框则探测定位。日志：`%TEMP%\hostrans.log`。
+Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 管理员运行，窗口化最大化。
+
+- 悬浮窗常驻、背景全透明
+- Ctrl+P：有中文 → 中译韩；空框 → 初始化（回车、打字、回车，不用 Ctrl+V）
+- 翻译：Google → 微软 → DeepLX → 有道
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .

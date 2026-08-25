@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -19,7 +18,8 @@ const (
 	wsPopup        = 0x80000000
 	wsVisible      = 0x10000000
 
-	lwaAlpha      = 0x00000002
+	lwaColorkey   = 0x00000001
+	chromaKey     = 0x00FF00FF // 品红，用作透明色键
 	swShow        = 5
 	swHide        = 0
 	hwndTopmost   = ^uintptr(0) // HWND_TOPMOST = -1
@@ -107,13 +107,13 @@ type msg struct {
 }
 
 type Overlay struct {
-	hwnd uintptr
-	font uintptr
+	hwnd     uintptr
+	fontChat uintptr
+	fontHint uintptr
 
 	mu      sync.Mutex
 	lines   []Line
 	visible bool
-	hideT   *time.Timer
 
 	OnLocate         func()
 	OnTranslateInput func()
@@ -176,7 +176,6 @@ func (o *Overlay) Push(speaker, text string) {
 	}
 	o.mu.Unlock()
 	o.redraw()
-	o.armHide()
 }
 
 func (o *Overlay) Status(msg string) {
@@ -198,19 +197,10 @@ func (o *Overlay) Show() {
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppShow, 0, 0)
 	}
-	o.armHide()
 }
 
 func (o *Overlay) Stay() {
-	if o.hwnd != 0 {
-		procPostMessageW.Call(o.hwnd, wmAppShow, 0, 0)
-	}
-	o.mu.Lock()
-	if o.hideT != nil {
-		o.hideT.Stop()
-		o.hideT = nil
-	}
-	o.mu.Unlock()
+	o.Show()
 }
 
 func (o *Overlay) Hide() {
@@ -229,17 +219,6 @@ func (o *Overlay) redraw() {
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppRedraw, 0, 0)
 	}
-}
-
-func (o *Overlay) armHide() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.hideT != nil {
-		o.hideT.Stop()
-	}
-	o.hideT = time.AfterFunc(4500*time.Millisecond, func() {
-		o.Hide()
-	})
 }
 
 func (o *Overlay) Run() error {
@@ -280,12 +259,18 @@ func (o *Overlay) Run() error {
 		return err
 	}
 	o.hwnd = hwnd
-	procSetLayeredWindowAttributes.Call(hwnd, 0, 210, lwaAlpha)
+	procSetLayeredWindowAttributes.Call(hwnd, chromaKey, 255, lwaColorkey)
 	procSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpShowWindow)
 
 	face, _ := windows.UTF16PtrFromString("Microsoft YaHei UI")
-	o.font, _, _ = procCreateFontW.Call(
-		^uintptr(17)+1, // -18 height
+	o.fontChat, _, _ = procCreateFontW.Call(
+		^uintptr(17)+1,
+		0, 0, 0, fwNormal, 0, 0, 0,
+		defaultChar, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(face)),
+	)
+	o.fontHint, _, _ = procCreateFontW.Call(
+		^uintptr(11)+1,
 		0, 0, 0, fwNormal, 0, 0, 0,
 		defaultChar, 0, 0, 0, 0,
 		uintptr(unsafe.Pointer(face)),
@@ -295,9 +280,8 @@ func (o *Overlay) Run() error {
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
 
-	o.Status("等待进入对局…")
-	o.Status("Ctrl+P 中译韩 / 空框则初始化  ·  Ctrl+Tab 显示")
-	o.armHide()
+	o.Status("等待游戏")
+	o.Status("P=译韩/空=初始化")
 
 	var m msg
 	for {
@@ -311,8 +295,11 @@ func (o *Overlay) Run() error {
 
 	procUnregisterHotKey.Call(hwnd, hotShow)
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
-	if o.font != 0 {
-		procDeleteObject.Call(o.font)
+	if o.fontChat != 0 {
+		procDeleteObject.Call(o.fontChat)
+	}
+	if o.fontHint != 0 {
+		procDeleteObject.Call(o.fontHint)
 	}
 	active = nil
 	return nil
@@ -400,29 +387,27 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	var rc rect
 	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
-	brush, _, _ := procCreateSolidBrush.Call(uintptr(rgb(36, 36, 78)))
+	brush, _, _ := procCreateSolidBrush.Call(chromaKey)
 	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), brush)
 	procDeleteObject.Call(brush)
-
-	if o.font != 0 {
-		procSelectObject.Call(hdc, o.font)
-	}
 	procSetBkMode.Call(hdc, transparent)
 
-	draw := func(x, y, w, h int32, color uint32, s string) int32 {
+	draw := func(font uintptr, x, y, w, minH int32, color uint32, s string) int32 {
 		if s == "" {
 			return 0
 		}
+		if font != 0 {
+			procSelectObject.Call(hdc, font)
+		}
 		procSetTextColor.Call(hdc, uintptr(color))
-		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + h}
+		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + 80}
 		u, _ := windows.UTF16FromString(s)
-		// 计算高度
 		calc := r
 		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
 			uintptr(unsafe.Pointer(&calc)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
 		height := calc.Bottom - calc.Top
-		if height < 18 {
-			height = 18
+		if height < minH {
+			height = minH
 		}
 		r.Bottom = r.Top + height
 		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
@@ -430,33 +415,26 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return height
 	}
 
-	y := int32(10)
-	draw(14, y, winW-50, 24, rgb(255, 255, 255), "HOSTrans")
-	draw(winW-32, y, 24, 24, rgb(220, 180, 180), "×")
-	y += 28
-	draw(14, y, winW-28, 18, rgb(140, 140, 190), "说话人：中文译文")
-	y += 22
+	hint := rgb(110, 110, 110)
+	y := int32(8)
+	draw(o.fontHint, 14, y, winW-50, 14, hint, "HOSTrans")
+	draw(o.fontHint, winW-28, y, 20, 14, rgb(90, 90, 90), "×")
+	y += 18
 
 	o.mu.Lock()
 	lines := append([]Line(nil), o.lines...)
 	o.mu.Unlock()
 
-	maxY := int32(winH - 48)
+	maxY := int32(winH - 28)
 	for _, ln := range lines {
 		if y >= maxY {
 			break
 		}
-		var s string
-		var col uint32
 		if ln.Status {
-			s = ln.Text
-			col = rgb(160, 200, 255)
+			y += draw(o.fontHint, 14, y, winW-28, 14, hint, ln.Text) + 4
 		} else {
-			s = ln.Speaker + "：" + ln.Text
-			col = rgb(255, 230, 140)
+			y += draw(o.fontChat, 14, y, winW-28, 20, rgb(255, 230, 140), ln.Speaker+"："+ln.Text) + 6
 		}
-		h := draw(14, y, winW-28, 80, col, s)
-		y += h + 6
 	}
-	draw(14, winH-36, winW-28, 28, rgb(150, 150, 180), "Ctrl+P 译韩/空则初始化")
+	draw(o.fontHint, 14, winH-22, winW-28, 14, hint, "P译韩 空初始化")
 }

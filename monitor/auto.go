@@ -9,7 +9,6 @@ import (
 	"hostrans/memory"
 )
 
-// 选人界面、局内 HUD 常见的聊天占位/频道标记。
 var chatMarkers = []string{
 	`<c val="3184FF">[团队]:</c>`,
 	`<c val="3184FF">[队伍]:</c>`,
@@ -104,7 +103,6 @@ func (m *Monitor) pruneDead() int {
 	return n
 }
 
-// LocatePassive 不发聊天，靠频道标记找出选人/局内控件。
 func (m *Monitor) LocatePassive(log func(string)) error {
 	p := m.proc()
 	if p == nil || !p.Alive() {
@@ -143,7 +141,7 @@ func (m *Monitor) LocatePassive(log func(string)) error {
 		return fmt.Errorf("未找到聊天控件")
 	}
 	if log != nil && added > 0 {
-		log(fmt.Sprintf("被动定位 +%d，当前监听 %d 处", added, m.BufferCount()))
+		log(fmt.Sprintf("定位 +%d", added))
 	}
 	debugLog("passive locate added=%d total=%d", added, m.BufferCount())
 	return nil
@@ -160,78 +158,23 @@ func sleepStop(d time.Duration, stop <-chan struct{}) bool {
 	}
 }
 
-func (m *Monitor) initAfterLobby(stop <-chan struct{}, sink Sink) bool {
-	debugLog("battlelobby → init")
-	if sink != nil {
-		sink.Status("检测到对局，即将初始化")
-		sink.Stay()
-	}
-	// 等加载画面稍稳，期间不要反复扫全堆
-	if !sleepStop(5*time.Second, stop) {
-		return false
-	}
-	m.resetLock()
-	_ = m.AttachIfNeeded()
-
-	if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
-		if sink != nil {
-			sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
-			sink.Show()
-		}
-		return true
-	}
-	if !sleepStop(5*time.Second, stop) {
-		return false
-	}
-	if err := m.LocatePassive(nil); err == nil && m.BufferCount() > 0 {
-		if sink != nil {
-			sink.Status(fmt.Sprintf("初始化完成，监听 %d 处", m.BufferCount()))
-			sink.Show()
-		}
-		return true
-	}
-
-	// 不自动发探测串（会抢键鼠、误发聊天）。空框 Ctrl+P 才探测。
-	if sink != nil {
-		sink.Status("检测到对局。打开空聊天框按 Ctrl+P 初始化")
-		sink.Show()
-	}
-	debugLog("auto init: passive miss, wait Ctrl+P")
-	return true
-}
-
-// AutoInit 借鉴 HotsStats：轮询 battlelobby。
-// 只在「新写出/mtime 变化」时触发，忽略启动时已经存在的旧文件。
+// AutoInit 只等游戏进程；初始化改由空聊天框 Ctrl+P 触发。
 func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
-	var lastMod time.Time
-	watching := false
 	for {
-		_ = m.AttachIfNeeded()
-		m.pruneDead()
-
-		mt, ok := battleLobbyModTime()
-		if !ok {
-			watching = false
-			lastMod = time.Time{}
-		} else if !watching {
-			watching = true
-			lastMod = mt
-			// 启动时就在加载画面（文件很新）才立刻跟；大厅残留的旧文件忽略
-			if isFreshLobby(mt, 90*time.Second) {
-				if !m.initAfterLobby(stop, sink) {
-					return
-				}
-			} else {
-				debugLog("ignore stale battlelobby age=%s", time.Since(mt))
+		if err := m.AttachIfNeeded(); err != nil {
+			if sink != nil {
+				sink.Status("等待游戏")
 			}
-		} else if !mt.Equal(lastMod) {
-			lastMod = mt
-			if !m.initAfterLobby(stop, sink) {
+			if !sleepStop(3*time.Second, stop) {
 				return
 			}
+			continue
 		}
-
-		if !sleepStop(time.Second, stop) {
+		m.pruneDead()
+		if m.BufferCount() == 0 && sink != nil {
+			sink.Status("空框 Ctrl+P 初始化")
+		}
+		if !sleepStop(3*time.Second, stop) {
 			return
 		}
 	}

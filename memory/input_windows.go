@@ -13,17 +13,17 @@ import (
 )
 
 const (
-	inputKeyboard  = 1
-	keyeventfKeyup = 0x0002
-	vkReturn       = 0x0D
-	vkControl      = 0x11
-	vkMenu         = 0x12
-	vkA            = 0x41
-	vkC            = 0x43
-	vkV            = 0x56
-	cfUnicodeText  = 13
-	gmemMoveable   = 0x0002
-	swRestore      = 9
+	inputKeyboard    = 1
+	keyeventfKeyup   = 0x0002
+	keyeventfUnicode = 0x0004
+	vkReturn         = 0x0D
+	vkControl        = 0x11
+	vkMenu           = 0x12
+	vkA              = 0x41
+	vkC              = 0x43
+	cfUnicodeText    = 13
+	gmemMoveable     = 0x0002
+	swRestore        = 9
 )
 
 type kbInput struct {
@@ -169,6 +169,24 @@ func chord(mod, vk uint16) {
 	sendKey(mod, true)
 }
 
+// typeText 用 Unicode 逐字输入，避免 Ctrl+V 被游戏绑成插旗。
+func typeText(s string) {
+	u16, err := windows.UTF16FromString(s)
+	if err != nil {
+		return
+	}
+	for _, ch := range u16 {
+		if ch == 0 {
+			continue
+		}
+		down := kbInput{Type: inputKeyboard, Scan: ch, Flags: keyeventfUnicode}
+		sendInput(down)
+		up := kbInput{Type: inputKeyboard, Scan: ch, Flags: keyeventfUnicode | keyeventfKeyup}
+		sendInput(up)
+		time.Sleep(18 * time.Millisecond)
+	}
+}
+
 func SetClipboardText(s string) error {
 	u16, err := windows.UTF16FromString(s)
 	if err != nil {
@@ -244,21 +262,16 @@ func restoreClipboard(old string, ok bool) {
 	}
 }
 
-// SendChat 打开聊天框、粘贴并发送。初始化定位时使用。
+// SendChat 对局探测：回车开框 → 逐字输入 → 回车发送（聊天框随发送关闭）。
+// 不用 Ctrl+V，避免变成插旗。
 func SendChat(pid uint32, text string) error {
-	old, err := GetClipboardText()
-	defer restoreClipboard(old, err == nil)
-
 	if err := FocusGame(pid); err != nil {
 		return err
 	}
-	if err := SetClipboardText(text); err != nil {
-		return err
-	}
 	tap(vkReturn)
-	time.Sleep(180 * time.Millisecond)
-	chord(vkControl, vkV)
-	time.Sleep(120 * time.Millisecond)
+	time.Sleep(280 * time.Millisecond)
+	typeText(text)
+	time.Sleep(80 * time.Millisecond)
 	tap(vkReturn)
 	time.Sleep(450 * time.Millisecond)
 	return nil
@@ -280,19 +293,13 @@ func PasteToGame(pid uint32, text string) error {
 	if err := FocusGame(pid); err != nil {
 		return err
 	}
-	if err := SetClipboardText(text); err != nil {
-		return err
-	}
 	chord(vkControl, vkA)
 	time.Sleep(40 * time.Millisecond)
-	chord(vkControl, vkV)
+	typeText(text)
 	return nil
 }
 
-// TranslateChatBox 把输入框译成 target 并贴回，结束后恢复剪贴板。
+// TranslateChatBox 全选后用 Unicode 输入译文（不 Ctrl+V）。
 func TranslateChatBox(pid uint32, translated string) error {
-	old, err := GetClipboardText()
-	ok := err == nil
-	defer restoreClipboard(old, ok)
 	return PasteToGame(pid, translated)
 }
