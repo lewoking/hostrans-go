@@ -266,14 +266,19 @@ func restoreClipboard(old string, ok bool) {
 // 不用 Ctrl+V，避免变成插旗。
 func SendChat(pid uint32, text string) error {
 	if err := FocusGame(pid); err != nil {
+		debugMem("SendChat FocusGame: %v", err)
 		return err
 	}
 	tap(vkReturn)
 	time.Sleep(280 * time.Millisecond)
+	// 清掉输入框残留（例如 Ctrl+C 漏进游戏的 'c'），避免发出 cHT...
+	chord(vkControl, vkA)
+	time.Sleep(40 * time.Millisecond)
 	typeText(text)
 	time.Sleep(80 * time.Millisecond)
 	tap(vkReturn)
 	time.Sleep(450 * time.Millisecond)
+	debugMem("SendChat sent %q", text)
 	return nil
 }
 

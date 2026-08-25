@@ -11,14 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const (
-	GameProcessName = "HeroesOfTheStorm_x64.exe"
-
-	memCommit     = 0x1000
-	memPrivate    = 0x20000
-	pageReadWrite = 0x04
-	maxScanRegion = 64 << 20 // 64MB，聊天缓冲区不会在巨型映射里
-)
+const GameProcessName = "HeroesOfTheStorm_x64.exe"
 
 // Process 表示目标游戏进程
 type Process struct {
@@ -134,19 +127,33 @@ func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
 		return hits, nil
 	}
 	var addr uintptr
+	var scanned, skipped int
+	var nbytes uint64
 	for {
 		mbi, err := p.queryMBI(addr)
 		if err != nil || mbi.RegionSize == 0 {
 			break
 		}
 		next := mbi.BaseAddress + mbi.RegionSize
-		if mbi.State == memCommit &&
-			mbi.Type == memPrivate &&
-			mbi.Protect&pageReadWrite != 0 &&
-			mbi.RegionSize > 0 &&
-			mbi.RegionSize <= maxScanRegion {
-			data, err := p.ReadMemory(mbi.BaseAddress, uint(mbi.RegionSize))
-			if err == nil {
+		if !ShouldScanRegion(uint32(mbi.State), uint32(mbi.Type), uint32(mbi.Protect), mbi.RegionSize) {
+			skipped++
+			if next <= addr {
+				break
+			}
+			addr = next
+			continue
+		}
+		scanned++
+		base := mbi.BaseAddress
+		remain := mbi.RegionSize
+		for remain > 0 {
+			chunk := remain
+			if chunk > scanChunk {
+				chunk = scanChunk
+			}
+			data, err := p.ReadMemory(base, uint(chunk))
+			if err == nil && len(data) > 0 {
+				nbytes += uint64(len(data))
 				for i, pat := range patterns {
 					if len(pat) == 0 {
 						continue
@@ -157,17 +164,27 @@ func (p *Process) ScanPrivateRWMulti(patterns [][]byte) ([][]uintptr, error) {
 						if idx < 0 {
 							break
 						}
-						hits[i] = append(hits[i], mbi.BaseAddress+uintptr(offset+idx))
+						hits[i] = append(hits[i], base+uintptr(offset+idx))
 						offset += idx + 1
 					}
 				}
 			}
+			base += chunk
+			remain -= chunk
 		}
 		if next <= addr {
 			break
 		}
 		addr = next
 	}
+	n0, n1 := 0, 0
+	if len(hits) > 0 {
+		n0 = len(hits[0])
+	}
+	if len(hits) > 1 {
+		n1 = len(hits[1])
+	}
+	debugMem("scan regions=%d skipped=%d bytes=%d hits0=%d hits1=%d", scanned, skipped, nbytes, n0, n1)
 	return hits, nil
 }
 

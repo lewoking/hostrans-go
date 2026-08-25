@@ -5,19 +5,22 @@
 ```mermaid
 flowchart TB
     Start(["hostrans.exe"]) --> Wait["等待游戏"]
-    Wait -->|"空聊天框 Ctrl+P"| Loc["初始化"]
+    Wait -->|"自动扫聊天标记"| Loc["初始化"]
     Loc --> Poll["监听韩语发言"]
     Poll --> ZH["说话人：中文译文"]
     ZH --> OV["透明常驻悬浮窗"]
     OV -->|"Ctrl+P 有中文"| Paste["中译韩并发送"]
+    OV -->|"空框 Ctrl+P"| Manual["手动探测"]
 ```
 
 Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) 管理员运行，窗口化最大化。
 
-- 空聊天框 Ctrl+P：初始化
+- 进游戏后自动探测聊天缓冲（不往队频发字）
+- 自动没找到：空聊天框 Ctrl+P 手动初始化
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
-- 托盘图标退出，或再次运行 / `hostrans.exe --quit`
+- 托盘图标退出（Win11 可能在任务栏 `^` 隐藏图标里），或再次运行 / `hostrans.exe --quit`
+- 排查日志：`%TEMP%\hostrans.log`（悬浮窗也会显示路径）
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .

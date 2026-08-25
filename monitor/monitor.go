@@ -127,8 +127,9 @@ func (m *Monitor) proc() *memory.Process {
 	return m.Proc
 }
 
-// Locate 向当前场景聊天框发探测串并加入监听列表。
-// 选人、局内各做一次即可两边都覆盖；已有缓冲时仍会找当前场景的新地址。
+// Locate 先被动扫聊天标记；找不到再发探测串。
+// 聊天记录是追加写入：同一地址不会被下一条覆盖，因此每轮全量重扫，
+// 有交集用交集（原地缓冲），没有则用本轮命中（追加型）。
 func (m *Monitor) Locate(log func(string)) error {
 	p := m.proc()
 	if p == nil || !p.Alive() {
@@ -139,6 +140,11 @@ func (m *Monitor) Locate(log func(string)) error {
 	}
 	defer m.endLocate()
 
+	if err := m.scanChatMarkers(log); err == nil && m.BufferCount() > 0 {
+		debugLog("locate: passive ok total=%d", m.BufferCount())
+		return nil
+	}
+
 	var utf8Hits, utf16Hits []uintptr
 	for i := 0; i < 3; i++ {
 		probe := memory.RandomProbe()
@@ -146,27 +152,33 @@ func (m *Monitor) Locate(log func(string)) error {
 		m.probes[probe] = struct{}{}
 		m.mu.Unlock()
 		if log != nil {
-			log(fmt.Sprintf("探测 %d/3", i+1))
+			log(fmt.Sprintf("探测 %d/3 %s", i+1, probe))
 		}
+		debugLog("locate: send probe %d/3 %s", i+1, probe)
 		if err := memory.SendChat(p.PID, probe); err != nil {
+			debugLog("locate: SendChat: %v", err)
 			return err
 		}
 		p8 := memory.EncodeProbe(probe, "utf-8")
 		p16 := memory.EncodeProbe(probe, "utf-16le")
-		if i == 0 {
-			var err error
-			utf8Hits, err = p.ScanPrivateRW(p8)
-			if err != nil {
-				return err
-			}
-			utf16Hits, err = p.ScanPrivateRW(p16)
-			if err != nil {
-				return err
-			}
-		} else {
-			utf8Hits = p.FilterContains(utf8Hits, p8)
-			utf16Hits = p.FilterContains(utf16Hits, p16)
+		u8, err := p.ScanPrivateRW(p8)
+		if err != nil {
+			debugLog("locate: utf8 scan: %v", err)
+			return err
 		}
+		u16, err := p.ScanPrivateRW(p16)
+		if err != nil {
+			debugLog("locate: utf16 scan: %v", err)
+			return err
+		}
+		if i == 0 {
+			utf8Hits, utf16Hits = u8, u16
+		} else {
+			utf8Hits = MergeProbeHits(utf8Hits, u8)
+			utf16Hits = MergeProbeHits(utf16Hits, u16)
+		}
+		debugLog("locate: probe %s utf8=%d utf16=%d keep8=%d keep16=%d",
+			probe, len(u8), len(u16), len(utf8Hits), len(utf16Hits))
 		if log != nil {
 			log(fmt.Sprintf("命中 %d/%d", len(utf8Hits), len(utf16Hits)))
 		}
@@ -174,38 +186,25 @@ func (m *Monitor) Locate(log func(string)) error {
 			return fmt.Errorf("探测失败")
 		}
 	}
-	enc, addr, err := pickAddr(utf8Hits, utf16Hits)
-	if err != nil {
-		return err
+	added := 0
+	for _, addr := range utf8Hits {
+		if m.addBuffer("utf-8", addr) {
+			added++
+		}
 	}
-	added := m.addBuffer(enc, addr)
+	for _, addr := range utf16Hits {
+		if m.addBuffer("utf-16le", addr) {
+			added++
+		}
+	}
+	if m.BufferCount() == 0 {
+		return fmt.Errorf("初始化失败")
+	}
 	if log != nil {
-		if added {
-			log(fmt.Sprintf("已监听 %d 处", m.BufferCount()))
-		} else {
-			log("当前场景已在监听")
-		}
+		log(fmt.Sprintf("已监听 %d 处", m.BufferCount()))
 	}
+	debugLog("locate: added=%d total=%d", added, m.BufferCount())
 	return nil
-}
-
-func pickAddr(utf8Hits, utf16Hits []uintptr) (string, uintptr, error) {
-	type hit struct {
-		enc   string
-		addrs []uintptr
-	}
-	opts := []hit{{"utf-8", utf8Hits}, {"utf-16le", utf16Hits}}
-	for _, o := range opts {
-		if len(o.addrs) == 1 {
-			return o.enc, o.addrs[0], nil
-		}
-	}
-	for _, o := range opts {
-		if len(o.addrs) > 1 && len(o.addrs) <= 8 {
-			return o.enc, o.addrs[0], nil
-		}
-	}
-	return "", 0, fmt.Errorf("初始化失败")
 }
 
 func (m *Monitor) Tick(sink Sink) {
@@ -352,12 +351,14 @@ func (m *Monitor) TranslateInput(log func(string)) {
 		src = ""
 	}
 	src = trimChat(src)
+	debugLog("input capture src=%q err=%v", src, err)
 	// 输入框空/没有中文：当作初始化（原 Ctrl+1）
 	if src == "" || !memory.ContainsHan(src) {
 		if log != nil {
 			log("空框，初始化…")
 		}
 		if err := m.Locate(log); err != nil {
+			debugLog("manual locate: %v", err)
 			if log != nil {
 				log(err.Error())
 			}
