@@ -16,7 +16,7 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 
 - 悬浮窗常驻、背景全透明
 - Ctrl+P：有中文 → 中译韩；空框 → 初始化（回车、打字、回车，不用 Ctrl+V）
-- 翻译：Google → 微软 → DeepLX → 有道
+- 翻译：Google → DeepLX
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -H windowsgui" -o hostrans.exe .

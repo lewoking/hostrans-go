@@ -13,6 +13,13 @@ func TestGoogleParseSample(t *testing.T) {
 	}
 }
 
+func TestDeepLXDefaultURL(t *testing.T) {
+	d := NewDeepLXTranslator("")
+	if d.endpoint != deepLXDefaultURL {
+		t.Fatalf("endpoint = %s, want %s", d.endpoint, deepLXDefaultURL)
+	}
+}
+
 func probe(t *testing.T, name string, tr Translator, text, from, to string) (string, error) {
 	t.Helper()
 	got, err := tr.Translate(text, from, to)
@@ -35,9 +42,7 @@ func TestLiveEngines(t *testing.T) {
 	}
 	engines := []Translator{
 		NewGoogleTranslator(),
-		NewMicrosoftTranslator(),
 		NewDeepLXTranslator(""),
-		NewYoudaoTranslator(),
 	}
 	anyOK := false
 	for _, eng := range engines {
@@ -58,6 +63,12 @@ func TestLiveEngines(t *testing.T) {
 
 func TestLiveManager(t *testing.T) {
 	m := NewManager()
+	if len(m.engines) != 2 {
+		t.Fatalf("engines = %d, want Google+DeepLX", len(m.engines))
+	}
+	if m.engines[0].Name() != "Google" || m.engines[1].Name() != "DeepLX" {
+		t.Fatalf("engine order = %s, %s", m.engines[0].Name(), m.engines[1].Name())
+	}
 	ko, err := m.Translate("集合中路", "zh", "ko")
 	if err != nil {
 		t.Fatalf("中→韩: %v", err)

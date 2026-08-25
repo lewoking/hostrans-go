@@ -2,15 +2,20 @@ package translator
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/andybalholm/brotli"
 )
 
 func rejectNonJSON(data []byte) error {
@@ -30,218 +35,11 @@ type Translator interface {
 	Name() string
 }
 
-// ==================== 微软免费翻译（无 Key） ====================
-type MicrosoftTranslator struct {
-	client *http.Client
-}
-
-func NewMicrosoftTranslator() *MicrosoftTranslator {
-	return &MicrosoftTranslator{
-		client: &http.Client{Timeout: 8 * time.Second},
-	}
-}
-
-func (m *MicrosoftTranslator) Name() string { return "Microsoft" }
-
-var (
-	edgeMu    sync.Mutex
-	edgeToken string
-	edgeUntil time.Time
+const (
+	googleOrigin     = "https://translate.googleapis.com"
+	deepLXDefaultURL = "https://trans.ors.de5.net/translate?token=1c6823aa2250"
+	httpUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
 )
-
-func fetchEdgeToken(client *http.Client) string {
-	edgeMu.Lock()
-	defer edgeMu.Unlock()
-	if edgeToken != "" && time.Now().Before(edgeUntil) {
-		return edgeToken
-	}
-	req, err := http.NewRequest("GET", "https://edge.microsoft.com/translate/auth", nil)
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	tok := strings.TrimSpace(string(data))
-	if tok == "" || resp.StatusCode != 200 {
-		return ""
-	}
-	edgeToken = tok
-	edgeUntil = time.Now().Add(8 * time.Minute)
-	return tok
-}
-
-func (m *MicrosoftTranslator) Translate(text, from, to string) (string, error) {
-	apiURL := "https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&to=" + url.QueryEscape(to)
-	if from != "" && from != "auto" {
-		apiURL += "&from=" + url.QueryEscape(from)
-	}
-
-	payload, _ := json.Marshal([]map[string]string{{"Text": text}})
-	req, err := http.NewRequest("POST", apiURL, strings.NewReader(string(payload)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/120.0.0.0")
-	tok := fetchEdgeToken(m.client)
-	if tok == "" {
-		return "", fmt.Errorf("无 token")
-	}
-	req.Header.Set("Authorization", "Bearer "+tok)
-
-	resp, err := m.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err := rejectNonJSON(data); err != nil {
-		return "", err
-	}
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("http %d", resp.StatusCode)
-	}
-
-	var result []struct {
-		Translations []struct {
-			Text string `json:"text"`
-		} `json:"translations"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("解析失败")
-	}
-	if len(result) == 0 || len(result[0].Translations) == 0 {
-		return "", fmt.Errorf("empty microsoft result")
-	}
-	return result[0].Translations[0].Text, nil
-}
-
-// ==================== DeepLX 免费接口（无 Key） ====================
-type DeepLXTranslator struct {
-	client  *http.Client
-	baseURL string
-}
-
-func NewDeepLXTranslator(baseURL string) *DeepLXTranslator {
-	if baseURL == "" {
-		// 常用公共实例（可自行替换更稳定的）
-		baseURL = "https://deeplx.vercel.app"
-	}
-	return &DeepLXTranslator{
-		client:  &http.Client{Timeout: 12 * time.Second},
-		baseURL: strings.TrimRight(baseURL, "/"),
-	}
-}
-
-func (d *DeepLXTranslator) Name() string { return "DeepLX" }
-
-func (d *DeepLXTranslator) Translate(text, from, to string) (string, error) {
-	if from == "" || from == "auto" {
-		from = "auto"
-	}
-	payload := map[string]interface{}{
-		"text":        text,
-		"source_lang": strings.ToUpper(from),
-		"target_lang": strings.ToUpper(to),
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequest("POST", d.baseURL+"/translate", strings.NewReader(string(body)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err := rejectNonJSON(data); err != nil {
-		return "", err
-	}
-	var result struct {
-		Code    int    `json:"code"`
-		Data    string `json:"data"`
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("解析失败")
-	}
-	if result.Code != 200 {
-		return "", fmt.Errorf("deeplx code %d: %s", result.Code, result.Message)
-	}
-	return result.Data, nil
-}
-
-// ==================== 有道免费网页接口（无 Key） ====================
-type YoudaoTranslator struct {
-	client *http.Client
-}
-
-func NewYoudaoTranslator() *YoudaoTranslator {
-	return &YoudaoTranslator{client: &http.Client{Timeout: 8 * time.Second}}
-}
-
-func (y *YoudaoTranslator) Name() string { return "Youdao" }
-
-func (y *YoudaoTranslator) Translate(text, from, to string) (string, error) {
-	// 有道公开接口（有频率限制，适合备用）
-	form := url.Values{}
-	form.Set("i", text)
-	form.Set("from", langMap(from))
-	form.Set("to", langMap(to))
-	form.Set("doctype", "json")
-	form.Set("version", "2.1")
-	form.Set("keyfrom", "fanyi.web")
-	form.Set("action", "FY_BY_REALTIME")
-	form.Set("typoResult", "false")
-
-	req, err := http.NewRequest("POST", "https://fanyi.youdao.com/translate?smartresult=dict&smartresult=rule", strings.NewReader(form.Encode()))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-	req.Header.Set("Referer", "https://fanyi.youdao.com/")
-	req.Header.Set("Origin", "https://fanyi.youdao.com")
-
-	resp, err := y.client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err := rejectNonJSON(data); err != nil {
-		return "", err
-	}
-	var result struct {
-		TranslateResult [][]struct {
-			Tgt string `json:"tgt"`
-			Src string `json:"src"`
-		} `json:"translateResult"`
-		ErrorCode string `json:"errorCode"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return "", fmt.Errorf("解析失败")
-	}
-	if result.ErrorCode != "0" && result.ErrorCode != "" {
-		return "", fmt.Errorf("youdao errorCode %s", result.ErrorCode)
-	}
-	if len(result.TranslateResult) == 0 || len(result.TranslateResult[0]) == 0 {
-		return "", fmt.Errorf("empty youdao result")
-	}
-	return result.TranslateResult[0][0].Tgt, nil
-}
 
 // ==================== Google 公共接口（无 Key） ====================
 type GoogleTranslator struct {
@@ -276,12 +74,12 @@ func (g *GoogleTranslator) Translate(text, from, to string) (string, error) {
 	q.Set("tl", googleLang(to))
 	q.Set("dt", "t")
 	q.Set("q", text)
-	api := "https://translate.googleapis.com/translate_a/single?" + q.Encode()
+	api := googleOrigin + "/translate_a/single?" + q.Encode()
 	req, err := http.NewRequest("GET", api, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("User-Agent", httpUserAgent)
 	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", err
@@ -316,22 +114,173 @@ func (g *GoogleTranslator) Translate(text, from, to string) (string, error) {
 	return out, nil
 }
 
-func langMap(lang string) string {
-	switch strings.ToLower(lang) {
-	case "zh", "zh-cn", "chinese":
-		return "zh-CHS"
-	case "kor", "ko", "korean":
-		return "ko"
-	case "en", "eng", "english":
-		return "en"
-	case "auto", "":
-		return "AUTO"
-	default:
-		return lang
+// ==================== DeepLX ====================
+type DeepLXTranslator struct {
+	client   *http.Client
+	endpoint string
+}
+
+func newDeepLXClient() *http.Client {
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Timeout: 12 * time.Second,
+		Jar:     jar,
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DisableCompression:    true,
+			ForceAttemptHTTP2:     true,
+			TLSHandshakeTimeout:   8 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
 	}
 }
 
-// ==================== 多引擎自动回退（开箱即用） ====================
+func NewDeepLXTranslator(endpoint string) *DeepLXTranslator {
+	if endpoint == "" {
+		endpoint = deepLXDefaultURL
+	}
+	return &DeepLXTranslator{
+		client:   newDeepLXClient(),
+		endpoint: endpoint,
+	}
+}
+
+func (d *DeepLXTranslator) Name() string { return "DeepLX" }
+
+func (d *DeepLXTranslator) setBrowserHeaders(req *http.Request) {
+	origin := "https://trans.ors.de5.net"
+	if u, err := url.Parse(d.endpoint); err == nil && u.Scheme != "" && u.Host != "" {
+		origin = u.Scheme + "://" + u.Host
+	}
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,ko;q=0.7")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Referer", origin+"/")
+	req.Header.Set("User-Agent", httpUserAgent)
+	req.Header.Set("Sec-Ch-Ua", `"Google Chrome";v="151", "Chromium";v="151", "Not_A Brand";v="24"`)
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", `"Windows"`)
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Priority", "u=1, i")
+}
+
+func looksJSON(b []byte) bool {
+	s := bytes.TrimSpace(b)
+	return len(s) > 0 && (s[0] == '{' || s[0] == '[')
+}
+
+func decodeHTTPBody(resp *http.Response) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	isGzip := enc == "gzip" || (len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b)
+	if isGzip {
+		gz, err := gzip.NewReader(bytes.NewReader(raw))
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		return io.ReadAll(io.LimitReader(gz, 1<<20))
+	}
+	if enc == "deflate" {
+		fr := flate.NewReader(bytes.NewReader(raw))
+		defer fr.Close()
+		return io.ReadAll(io.LimitReader(fr, 1<<20))
+	}
+	if enc == "br" || enc == "brotli" || !looksJSON(raw) {
+		out, err := io.ReadAll(io.LimitReader(brotli.NewReader(bytes.NewReader(raw)), 1<<20))
+		if err == nil && looksJSON(out) {
+			return out, nil
+		}
+		if enc == "br" || enc == "brotli" {
+			if err != nil {
+				return nil, err
+			}
+			return out, nil
+		}
+	}
+	return raw, nil
+}
+
+func (d *DeepLXTranslator) postTranslate(body []byte) ([]byte, int, error) {
+	req, err := http.NewRequest("POST", d.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	d.setBrowserHeaders(req)
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	data, err := decodeHTTPBody(resp)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return data, resp.StatusCode, nil
+}
+
+func parseDeepLX(data []byte) (string, error) {
+	if err := rejectNonJSON(data); err != nil {
+		return "", err
+	}
+	var result struct {
+		Code    int    `json:"code"`
+		Data    string `json:"data"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return "", fmt.Errorf("解析失败")
+	}
+	if result.Code != 200 {
+		return "", fmt.Errorf("deeplx code %d: %s", result.Code, result.Message)
+	}
+	if result.Data == "" {
+		return "", fmt.Errorf("empty")
+	}
+	return result.Data, nil
+}
+
+func (d *DeepLXTranslator) Translate(text, from, to string) (string, error) {
+	if from == "" || from == "auto" {
+		from = "auto"
+	}
+	payload := map[string]interface{}{
+		"text":        text,
+		"source_lang": strings.ToUpper(from),
+		"target_lang": strings.ToUpper(to),
+	}
+	body, _ := json.Marshal(payload)
+
+	data, status, err := d.postTranslate(body)
+	if err != nil {
+		return "", err
+	}
+	out, err := parseDeepLX(data)
+	if err == nil {
+		return out, nil
+	}
+	// cookie 罐第一次可能被拦，收 cookie 后再打一次（对应 curl -b/-c）
+	if status == 403 || strings.Contains(err.Error(), "接口不可用") {
+		data, _, err2 := d.postTranslate(body)
+		if err2 != nil {
+			return "", err
+		}
+		if out, err2 = parseDeepLX(data); err2 == nil {
+			return out, nil
+		}
+		return "", err2
+	}
+	return "", err
+}
+
+// ==================== 多引擎自动回退 ====================
 type Manager struct {
 	engines []Translator
 	mu      sync.Mutex
@@ -343,9 +292,7 @@ func NewManager() *Manager {
 	return &Manager{
 		engines: []Translator{
 			NewGoogleTranslator(),
-			NewMicrosoftTranslator(),
 			NewDeepLXTranslator(""),
-			NewYoudaoTranslator(),
 		},
 		cache: make(map[string]string),
 	}
@@ -363,7 +310,7 @@ func clipRunes(s string, max int) string {
 	return string(r[:max])
 }
 
-// Translate 自动尝试所有无 Key 引擎，成功即返回（带短缓存，避免同一句反复打接口）。
+// Translate 自动尝试所有引擎，成功即返回（带短缓存，避免同一句反复打接口）。
 func (m *Manager) Translate(text, from, to string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -402,5 +349,5 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 }
 
 func (m *Manager) Name() string {
-	return "Multi-Engine (No-Key)"
+	return "Multi-Engine"
 }
