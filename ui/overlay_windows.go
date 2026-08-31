@@ -184,10 +184,10 @@ func rgb(r, g, b uint8) uint32 {
 	return uint32(r) | uint32(g)<<8 | uint32(b)<<16
 }
 
-func fade50(c uint32) uint32 {
-	r := byte(c) / 2
-	g := byte(c >> 8) / 2
-	b := byte(c >> 16) / 2
+func fadeIdle(c uint32) uint32 {
+	r := byte(c) / 4
+	g := byte(c >> 8) / 4
+	b := byte(c >> 16) / 4
 	return rgb(r, g, b)
 }
 
@@ -492,8 +492,8 @@ func (o *Overlay) paint(hwnd uintptr) {
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
 	if idle {
-		teamBlue = fade50(teamBlue)
-		chatWhite = fade50(chatWhite)
+		teamBlue = fadeIdle(teamBlue)
+		chatWhite = fadeIdle(chatWhite)
 	}
 	measureW := func(font uintptr, s string) int32 {
 		if s == "" {
