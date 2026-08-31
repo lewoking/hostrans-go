@@ -75,6 +75,10 @@ const (
 	padBot   = 8
 	winH     = padTop + maxChat*(lineMinH+lineGap) + padBot
 
+	chatFontPx  = 18
+	hintFontPx  = 12
+	idleFontDiv = 5
+
 	spiGetWorkArea = 0x0030
 	smCxScreen     = 0
 	smCyScreen     = 1
@@ -122,9 +126,10 @@ type msg struct {
 }
 
 type Overlay struct {
-	hwnd     uintptr
-	fontChat uintptr
-	fontHint uintptr
+	hwnd         uintptr
+	fontChat     uintptr
+	fontChatIdle uintptr
+	fontHint     uintptr
 
 	mu      sync.Mutex
 	lines   []Line
@@ -184,11 +189,11 @@ func rgb(r, g, b uint8) uint32 {
 	return uint32(r) | uint32(g)<<8 | uint32(b)<<16
 }
 
-func fadeIdle(c uint32) uint32 {
-	r := byte(c) / 4
-	g := byte(c >> 8) / 4
-	b := byte(c >> 16) / 4
-	return rgb(r, g, b)
+func fontHeight(px int) uintptr {
+	if px < 1 {
+		px = 1
+	}
+	return ^uintptr(px-1) + 1
 }
 
 func NewOverlay() *Overlay {
@@ -296,13 +301,19 @@ func (o *Overlay) Run() error {
 
 	face, _ := windows.UTF16PtrFromString("Microsoft YaHei UI")
 	o.fontChat, _, _ = procCreateFontW.Call(
-		^uintptr(17)+1,
+		fontHeight(chatFontPx),
+		0, 0, 0, fwNormal, 0, 0, 0,
+		defaultChar, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(face)),
+	)
+	o.fontChatIdle, _, _ = procCreateFontW.Call(
+		fontHeight(chatFontPx/idleFontDiv),
 		0, 0, 0, fwNormal, 0, 0, 0,
 		defaultChar, 0, 0, 0, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
 	o.fontHint, _, _ = procCreateFontW.Call(
-		^uintptr(11)+1,
+		fontHeight(hintFontPx),
 		0, 0, 0, fwNormal, 0, 0, 0,
 		defaultChar, 0, 0, 0, 0,
 		uintptr(unsafe.Pointer(face)),
@@ -328,6 +339,9 @@ func (o *Overlay) Run() error {
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
 	if o.fontChat != 0 {
 		procDeleteObject.Call(o.fontChat)
+	}
+	if o.fontChatIdle != 0 {
+		procDeleteObject.Call(o.fontChatIdle)
 	}
 	if o.fontHint != 0 {
 		procDeleteObject.Call(o.fontHint)
@@ -491,9 +505,19 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
-	if idle {
-		teamBlue = fadeIdle(teamBlue)
-		chatWhite = fadeIdle(chatWhite)
+	font := o.fontChat
+	minH := int32(lineMinH)
+	gap := int32(lineGap)
+	if idle && o.fontChatIdle != 0 {
+		font = o.fontChatIdle
+		minH = int32(lineMinH / idleFontDiv)
+		if minH < 1 {
+			minH = 1
+		}
+		gap = int32(lineGap / idleFontDiv)
+		if gap < 1 {
+			gap = 1
+		}
 	}
 	measureW := func(font uintptr, s string) int32 {
 		if s == "" {
@@ -525,16 +549,16 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if who != "" {
 			who += "："
 		}
-		ww := measureW(o.fontChat, who)
+		ww := measureW(font, who)
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := draw(o.fontChat, 14, y, ww+2, lineMinH, teamBlue, who)
-		h2 := draw(o.fontChat, 14+ww, y, winW-28-ww, lineMinH, chatWhite, ln.Text)
+		h1 := draw(font, 14, y, ww+2, minH, teamBlue, who)
+		h2 := draw(font, 14+ww, y, winW-28-ww, minH, chatWhite, ln.Text)
 		if h2 > h1 {
 			h1 = h2
 		}
-		y += h1 + lineGap
+		y += h1 + gap
 		shown++
 	}
 }

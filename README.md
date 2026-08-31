@@ -19,6 +19,6 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 自动没找到：空聊天框 Ctrl+P 手动初始化
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文
-- 30 秒无新译文后文字变淡，新句或显示窗口时恢复
+- 30 秒无新译文后字体缩为 1/5，新句或显示窗口时恢复
 
 
