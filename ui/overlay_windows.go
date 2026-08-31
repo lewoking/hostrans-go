@@ -36,9 +36,14 @@ const (
 	wmEraseBk   = 0x0014
 	wmClose     = 0x0010
 	wmApp       = 0x8000
-	wmAppRedraw = wmApp + 1
-	wmAppHide   = wmApp + 2
-	wmAppShow   = wmApp + 3
+	wmAppRedraw  = wmApp + 1
+	wmAppHide    = wmApp + 2
+	wmAppShow    = wmApp + 3
+	wmAppIdleArm = wmApp + 4
+	wmTimer      = 0x0113
+
+	idleTimerID = 1
+	idleAfterMs = 30000
 
 	htClient  = 1
 	htCaption = 2
@@ -124,6 +129,7 @@ type Overlay struct {
 	mu      sync.Mutex
 	lines   []Line
 	visible bool
+	idle    bool
 
 	OnLocate         func()
 	OnTranslateInput func()
@@ -167,6 +173,8 @@ var (
 	procCreateSolidBrush           = gdi32.NewProc("CreateSolidBrush")
 	procGetSystemMetrics           = user32.NewProc("GetSystemMetrics")
 	procSystemParametersInfoW      = user32.NewProc("SystemParametersInfoW")
+	procSetTimer                   = user32.NewProc("SetTimer")
+	procKillTimer                  = user32.NewProc("KillTimer")
 
 	wndProcCB = syscall.NewCallback(wndProc)
 	active    *Overlay
@@ -176,18 +184,27 @@ func rgb(r, g, b uint8) uint32 {
 	return uint32(r) | uint32(g)<<8 | uint32(b)<<16
 }
 
+func fade50(c uint32) uint32 {
+	r := byte(c) / 2
+	g := byte(c >> 8) / 2
+	b := byte(c >> 16) / 2
+	return rgb(r, g, b)
+}
+
 func NewOverlay() *Overlay {
 	return &Overlay{visible: true}
 }
 
 func (o *Overlay) Push(speaker, text string) {
 	o.mu.Lock()
+	o.idle = false
 	o.lines = append(o.lines, Line{Speaker: speaker, Text: text})
 	if len(o.lines) > maxChat {
 		o.lines = o.lines[len(o.lines)-maxChat:]
 	}
 	o.mu.Unlock()
 	o.redraw()
+	o.armIdle()
 }
 
 func (o *Overlay) Status(msg string) {
@@ -195,8 +212,12 @@ func (o *Overlay) Status(msg string) {
 }
 
 func (o *Overlay) Show() {
+	o.mu.Lock()
+	o.idle = false
+	o.mu.Unlock()
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppShow, 0, 0)
+		procPostMessageW.Call(o.hwnd, wmAppIdleArm, 0, 0)
 	}
 }
 
@@ -219,6 +240,12 @@ func (o *Overlay) Close() {
 func (o *Overlay) redraw() {
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppRedraw, 0, 0)
+	}
+}
+
+func (o *Overlay) armIdle() {
+	if o.hwnd != 0 {
+		procPostMessageW.Call(o.hwnd, wmAppIdleArm, 0, 0)
 	}
 }
 
@@ -369,6 +396,18 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 			showTrayMenu(hwnd)
 		}
 		return 0
+	case wmAppIdleArm:
+		procSetTimer.Call(hwnd, idleTimerID, idleAfterMs, 0)
+		return 0
+	case wmTimer:
+		if wParam == idleTimerID && o != nil {
+			o.mu.Lock()
+			o.idle = true
+			o.mu.Unlock()
+			procKillTimer.Call(hwnd, idleTimerID)
+			procInvalidateRect.Call(hwnd, 0, 1)
+		}
+		return 0
 	case wmAppRedraw:
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
@@ -387,6 +426,7 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 	case wmDestroy:
+		procKillTimer.Call(hwnd, idleTimerID)
 		procPostQuitMessage.Call(0)
 		return 0
 	}
@@ -444,8 +484,17 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return height
 	}
 
+	o.mu.Lock()
+	lines := append([]Line(nil), o.lines...)
+	idle := o.idle
+	o.mu.Unlock()
+
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
+	if idle {
+		teamBlue = fade50(teamBlue)
+		chatWhite = fade50(chatWhite)
+	}
 	measureW := func(font uintptr, s string) int32 {
 		if s == "" {
 			return 0
@@ -460,11 +509,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return r.Right - r.Left
 	}
 
-	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
-
-	o.mu.Lock()
-	lines := append([]Line(nil), o.lines...)
-	o.mu.Unlock()
+	draw(o.fontHint, winW-28, 8, 20, 14, rgb(255, 255, 255), "×")
 
 	y := int32(padTop)
 	maxY := int32(winH - padBot)
