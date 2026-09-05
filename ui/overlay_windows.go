@@ -27,6 +27,7 @@ const (
 	swpNoSize     = 0x0001
 	swpNoActivate = 0x0010
 	swpShowWindow = 0x0040
+	swpNoZOrder   = 0x0004
 
 	wmPaint     = 0x000F
 	wmDestroy   = 0x0002
@@ -53,11 +54,11 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 
-	dtLeft        = 0x0000
-	dtNoPrefix    = 0x0800
-	dtCalcRect    = 0x0400
-	dtSingleLine  = 0x0020
-	dtEndEllipsis = 0x00008000
+	dtLeft       = 0x0000
+	dtWordBreak  = 0x0010
+	dtNoPrefix   = 0x0800
+	dtCalcRect   = 0x0400
+	dtSingleLine = 0x0020
 	transparent = 1
 	fwNormal    = 400
 	defaultChar = 1
@@ -178,6 +179,8 @@ var (
 	procCreateSolidBrush           = gdi32.NewProc("CreateSolidBrush")
 	procGetSystemMetrics           = user32.NewProc("GetSystemMetrics")
 	procSystemParametersInfoW      = user32.NewProc("SystemParametersInfoW")
+	procGetDC                      = user32.NewProc("GetDC")
+	procReleaseDC                  = user32.NewProc("ReleaseDC")
 	procSetTimer                   = user32.NewProc("SetTimer")
 	procKillTimer                  = user32.NewProc("KillTimer")
 
@@ -350,7 +353,7 @@ func (o *Overlay) Run() error {
 	return nil
 }
 
-func overlayOrigin() (x, y int32) {
+func workArea() rect {
 	var wa rect
 	ok, _, _ := procSystemParametersInfoW.Call(spiGetWorkArea, 0, uintptr(unsafe.Pointer(&wa)), 0)
 	if ok == 0 {
@@ -358,6 +361,11 @@ func overlayOrigin() (x, y int32) {
 		sh, _, _ := procGetSystemMetrics.Call(smCyScreen)
 		wa = rect{Right: int32(sw), Bottom: int32(sh)}
 	}
+	return wa
+}
+
+func overlayOrigin() (x, y int32) {
+	wa := workArea()
 	const margin = 24
 	x = wa.Right - winW - margin
 	if x < wa.Left {
@@ -461,42 +469,15 @@ func inClose(hwnd uintptr, x, y int32) bool {
 }
 
 func (o *Overlay) paint(hwnd uintptr) {
-	var ps paintStruct
-	hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
-	if hdc == 0 {
+	hdcMeasure, _, _ := procGetDC.Call(hwnd)
+	if hdcMeasure == 0 {
 		return
 	}
-	defer procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
-
-	var rc rect
-	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
-	brush, _, _ := procCreateSolidBrush.Call(chromaKey)
-	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), brush)
-	procDeleteObject.Call(brush)
-	procSetBkMode.Call(hdc, transparent)
-
-	draw := func(font uintptr, x, y, w, minH int32, color uint32, s string) int32 {
-		if s == "" {
-			return minH
-		}
-		if font != 0 {
-			procSelectObject.Call(hdc, font)
-		}
-		procSetTextColor.Call(hdc, uintptr(color))
-		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + minH}
-		u, _ := windows.UTF16FromString(s)
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&r)), dtLeft|dtSingleLine|dtNoPrefix|dtEndEllipsis)
-		return minH
-	}
-
 	o.mu.Lock()
 	lines := append([]Line(nil), o.lines...)
 	idle := o.idle
 	o.mu.Unlock()
 
-	teamBlue := rgb(0x31, 0x84, 0xFF)
-	chatWhite := rgb(255, 255, 255)
 	font := o.fontChat
 	minH := int32(lineMinH)
 	gap := int32(lineGap)
@@ -511,7 +492,8 @@ func (o *Overlay) paint(hwnd uintptr) {
 			gap = 1
 		}
 	}
-	measureW := func(font uintptr, s string) int32 {
+
+	measureW := func(hdc, font uintptr, s string) int32 {
 		if s == "" {
 			return 0
 		}
@@ -524,16 +506,30 @@ func (o *Overlay) paint(hwnd uintptr) {
 			uintptr(unsafe.Pointer(&r)), dtLeft|dtNoPrefix|dtCalcRect|dtSingleLine)
 		return r.Right - r.Left
 	}
-
-	draw(o.fontHint, winW-28, 8, 20, 14, rgb(255, 255, 255), "×")
-
-	y := int32(padTop)
-	maxY := int32(winH - padBot)
-	shown := 0
-	for _, ln := range lines {
-		if y >= maxY || shown >= maxChat {
-			break
+	measureH := func(hdc, font uintptr, w, minH int32, s string) int32 {
+		if s == "" {
+			return 0
 		}
+		if font != 0 {
+			procSelectObject.Call(hdc, font)
+		}
+		r := rect{Right: w, Bottom: 8}
+		u, _ := windows.UTF16FromString(s)
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+			uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
+		h := r.Bottom - r.Top
+		if h < minH {
+			h = minH
+		}
+		return h
+	}
+
+	type row struct {
+		who, text string
+		ww, h     int32
+	}
+	var rows []row
+	for _, ln := range lines {
 		if ln.Status {
 			continue
 		}
@@ -541,16 +537,120 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if who != "" {
 			who += "："
 		}
-		ww := measureW(font, who)
+		ww := measureW(hdcMeasure, font, who)
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := draw(font, 14, y, ww+2, minH, teamBlue, who)
-		h2 := draw(font, 14+ww, y, winW-28-ww, minH, chatWhite, ln.Text)
-		if h2 > h1 {
-			h1 = h2
+		h1 := measureH(hdcMeasure, font, ww+2, minH, who)
+		h2 := measureH(hdcMeasure, font, winW-28-ww, minH, ln.Text)
+		h := h1
+		if h2 > h {
+			h = h2
 		}
-		y += h1 + gap
-		shown++
+		if h < minH {
+			h = minH
+		}
+		rows = append(rows, row{who: who, text: ln.Text, ww: ww, h: h})
+		if len(rows) >= maxChat {
+			break
+		}
+	}
+
+	needed := int32(padTop + padBot)
+	if len(rows) == 0 {
+		needed = padTop + minH + padBot
+	} else {
+		for _, r := range rows {
+			needed += r.h + gap
+		}
+	}
+	wa := workArea()
+	maxH := wa.Bottom - wa.Top - 48
+	if maxH < minH+int32(padTop+padBot) {
+		maxH = minH + int32(padTop+padBot)
+	}
+	if needed > maxH {
+		needed = maxH
+	}
+	for len(rows) > 1 {
+		sum := int32(padTop + padBot)
+		for _, r := range rows {
+			sum += r.h + gap
+		}
+		if sum <= needed {
+			break
+		}
+		rows = rows[1:]
+	}
+	if len(rows) > 0 {
+		needed = int32(padTop + padBot)
+		for _, r := range rows {
+			needed += r.h + gap
+		}
+		if needed > maxH {
+			needed = maxH
+		}
+	}
+	procReleaseDC.Call(hwnd, hdcMeasure)
+
+	var rc rect
+	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+	if rc.Bottom != needed {
+		procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(winW), uintptr(needed), swpNoMove|swpNoActivate|swpNoZOrder)
+	}
+
+	var ps paintStruct
+	hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+	if hdc == 0 {
+		return
+	}
+	defer procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+
+	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+	brush, _, _ := procCreateSolidBrush.Call(chromaKey)
+	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), brush)
+	procDeleteObject.Call(brush)
+	procSetBkMode.Call(hdc, transparent)
+
+	draw := func(font uintptr, x, y, w, minH int32, color uint32, s string) int32 {
+		if s == "" {
+			return 0
+		}
+		if font != 0 {
+			procSelectObject.Call(hdc, font)
+		}
+		procSetTextColor.Call(hdc, uintptr(color))
+		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + 400}
+		u, _ := windows.UTF16FromString(s)
+		calc := r
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+			uintptr(unsafe.Pointer(&calc)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
+		h := calc.Bottom - calc.Top
+		if h < minH {
+			h = minH
+		}
+		r.Bottom = r.Top + h
+		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+			uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix)
+		return h
+	}
+
+	teamBlue := rgb(0x31, 0x84, 0xFF)
+	chatWhite := rgb(255, 255, 255)
+	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
+
+	y := int32(padTop)
+	maxY := rc.Bottom - int32(padBot)
+	for _, row := range rows {
+		if y >= maxY {
+			break
+		}
+		h1 := draw(font, 14, y, row.ww+2, minH, teamBlue, row.who)
+		h2 := draw(font, 14+row.ww, y, winW-28-row.ww, minH, chatWhite, row.text)
+		h := h1
+		if h2 > h {
+			h = h2
+		}
+		y += h + gap
 	}
 }
