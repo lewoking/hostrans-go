@@ -68,7 +68,7 @@ const (
 	hotTransIn = 3
 
 	winW     = 360
-	maxChat  = 6
+	maxChat  = 10
 	lineMinH = 22
 	lineGap  = 6
 	padTop   = 8
