@@ -20,3 +20,6 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 有中文时 Ctrl+P：中译韩
 - 悬浮窗显示韩语发言的中文译文 （别忘了设置游戏窗口全屏模式）。
 - 30 秒无新译文后字体缩为 1/5，新句或显示窗口时恢复
+
+效果图：
+<img width="1063" height="775" alt="image" src="https://github.com/user-attachments/assets/e1894cd8-ced7-4bdf-a401-5aab617578d5" />
