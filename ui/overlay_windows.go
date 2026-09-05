@@ -53,11 +53,11 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 
-	dtLeft       = 0x0000
-	dtWordBreak  = 0x0010
-	dtNoPrefix   = 0x0800
-	dtCalcRect   = 0x0400
-	dtSingleLine = 0x0020
+	dtLeft        = 0x0000
+	dtNoPrefix    = 0x0800
+	dtCalcRect    = 0x0400
+	dtSingleLine  = 0x0020
+	dtEndEllipsis = 0x00008000
 	transparent = 1
 	fwNormal    = 400
 	defaultChar = 1
@@ -477,25 +477,17 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	draw := func(font uintptr, x, y, w, minH int32, color uint32, s string) int32 {
 		if s == "" {
-			return 0
+			return minH
 		}
 		if font != 0 {
 			procSelectObject.Call(hdc, font)
 		}
 		procSetTextColor.Call(hdc, uintptr(color))
-		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + 80}
+		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + minH}
 		u, _ := windows.UTF16FromString(s)
-		calc := r
 		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&calc)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
-		height := calc.Bottom - calc.Top
-		if height < minH {
-			height = minH
-		}
-		r.Bottom = r.Top + height
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix)
-		return height
+			uintptr(unsafe.Pointer(&r)), dtLeft|dtSingleLine|dtNoPrefix|dtEndEllipsis)
+		return minH
 	}
 
 	o.mu.Lock()
