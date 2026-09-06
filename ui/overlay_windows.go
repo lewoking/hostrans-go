@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -132,10 +133,11 @@ type Overlay struct {
 	fontChatIdle uintptr
 	fontHint     uintptr
 
-	mu      sync.Mutex
-	lines   []Line
-	visible bool
-	idle    bool
+	mu         sync.Mutex
+	lines      []Line
+	visible    bool
+	idle       bool
+	lastActive time.Time
 
 	OnLocate         func()
 	OnTranslateInput func()
@@ -206,6 +208,7 @@ func NewOverlay() *Overlay {
 func (o *Overlay) Push(speaker, text string) {
 	o.mu.Lock()
 	o.idle = false
+	o.lastActive = time.Now()
 	o.lines = append(o.lines, Line{Speaker: speaker, Text: text})
 	if len(o.lines) > maxChat {
 		o.lines = o.lines[len(o.lines)-maxChat:]
@@ -222,6 +225,7 @@ func (o *Overlay) Status(msg string) {
 func (o *Overlay) Show() {
 	o.mu.Lock()
 	o.idle = false
+	o.lastActive = time.Now()
 	o.mu.Unlock()
 	if o.hwnd != 0 {
 		procPostMessageW.Call(o.hwnd, wmAppShow, 0, 0)
@@ -423,14 +427,13 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 		return 0
 	case wmTimer:
 		if wParam == idleTimerID && o != nil {
-			o.mu.Lock()
-			o.idle = true
-			o.mu.Unlock()
-			procKillTimer.Call(hwnd, idleTimerID)
-			procInvalidateRect.Call(hwnd, 0, 1)
+			o.onIdleTimer(hwnd)
 		}
 		return 0
 	case wmAppRedraw:
+		if o != nil {
+			o.syncSize(hwnd)
+		}
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 	case wmAppHide:
@@ -445,6 +448,9 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 		}
 		procShowWindow.Call(hwnd, swShow)
 		procSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+		if o != nil {
+			o.syncSize(hwnd)
+		}
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
 	case wmDestroy:
@@ -468,19 +474,73 @@ func inClose(hwnd uintptr, x, y int32) bool {
 	return x >= rc.Right-36 && x <= rc.Right-8 && y >= 8 && y <= 32
 }
 
-func (o *Overlay) paint(hwnd uintptr) {
-	hdcMeasure, _, _ := procGetDC.Call(hwnd)
-	if hdcMeasure == 0 {
+func (o *Overlay) onIdleTimer(hwnd uintptr) {
+	o.mu.Lock()
+	waited := time.Since(o.lastActive)
+	o.mu.Unlock()
+	need := time.Duration(idleAfterMs) * time.Millisecond
+	if waited < need {
+		remain := int((need - waited) / time.Millisecond)
+		if remain < 50 {
+			remain = 50
+		}
+		procSetTimer.Call(hwnd, idleTimerID, uintptr(remain), 0)
 		return
 	}
+	o.mu.Lock()
+	o.idle = true
+	o.mu.Unlock()
+	procKillTimer.Call(hwnd, idleTimerID)
+	o.syncSize(hwnd)
+	procInvalidateRect.Call(hwnd, 0, 1)
+}
+
+type layoutRow struct {
+	who, text string
+	ww, h     int32
+}
+
+func measureTextW(hdc, font uintptr, s string) int32 {
+	if s == "" {
+		return 0
+	}
+	if font != 0 {
+		procSelectObject.Call(hdc, font)
+	}
+	r := rect{Right: winW, Bottom: 40}
+	u, _ := windows.UTF16FromString(s)
+	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+		uintptr(unsafe.Pointer(&r)), dtLeft|dtNoPrefix|dtCalcRect|dtSingleLine)
+	return r.Right - r.Left
+}
+
+func measureTextH(hdc, font uintptr, w, minH int32, s string) int32 {
+	if s == "" {
+		return 0
+	}
+	if font != 0 {
+		procSelectObject.Call(hdc, font)
+	}
+	r := rect{Right: w, Bottom: 8}
+	u, _ := windows.UTF16FromString(s)
+	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
+		uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
+	h := r.Bottom - r.Top
+	if h < minH {
+		h = minH
+	}
+	return h
+}
+
+func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH, gap, needed int32) {
 	o.mu.Lock()
 	lines := append([]Line(nil), o.lines...)
 	idle := o.idle
 	o.mu.Unlock()
 
-	font := o.fontChat
-	minH := int32(lineMinH)
-	gap := int32(lineGap)
+	font = o.fontChat
+	minH = int32(lineMinH)
+	gap = int32(lineGap)
 	if idle && o.fontChatIdle != 0 {
 		font = o.fontChatIdle
 		minH = int32(lineMinH / idleFontDiv)
@@ -493,42 +553,6 @@ func (o *Overlay) paint(hwnd uintptr) {
 		}
 	}
 
-	measureW := func(hdc, font uintptr, s string) int32 {
-		if s == "" {
-			return 0
-		}
-		if font != 0 {
-			procSelectObject.Call(hdc, font)
-		}
-		r := rect{Right: winW, Bottom: 40}
-		u, _ := windows.UTF16FromString(s)
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&r)), dtLeft|dtNoPrefix|dtCalcRect|dtSingleLine)
-		return r.Right - r.Left
-	}
-	measureH := func(hdc, font uintptr, w, minH int32, s string) int32 {
-		if s == "" {
-			return 0
-		}
-		if font != 0 {
-			procSelectObject.Call(hdc, font)
-		}
-		r := rect{Right: w, Bottom: 8}
-		u, _ := windows.UTF16FromString(s)
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
-		h := r.Bottom - r.Top
-		if h < minH {
-			h = minH
-		}
-		return h
-	}
-
-	type row struct {
-		who, text string
-		ww, h     int32
-	}
-	var rows []row
 	for _, ln := range lines {
 		if ln.Status {
 			continue
@@ -537,12 +561,12 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if who != "" {
 			who += "："
 		}
-		ww := measureW(hdcMeasure, font, who)
+		ww := measureTextW(hdc, font, who)
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := measureH(hdcMeasure, font, ww+2, minH, who)
-		h2 := measureH(hdcMeasure, font, winW-28-ww, minH, ln.Text)
+		h1 := measureTextH(hdc, font, ww+2, minH, who)
+		h2 := measureTextH(hdc, font, winW-28-ww, minH, ln.Text)
 		h := h1
 		if h2 > h {
 			h = h2
@@ -550,13 +574,13 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if h < minH {
 			h = minH
 		}
-		rows = append(rows, row{who: who, text: ln.Text, ww: ww, h: h})
+		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h})
 		if len(rows) >= maxChat {
 			break
 		}
 	}
 
-	needed := int32(padTop + padBot)
+	needed = int32(padTop + padBot)
 	if len(rows) == 0 {
 		needed = padTop + minH + padBot
 	} else {
@@ -591,14 +615,24 @@ func (o *Overlay) paint(hwnd uintptr) {
 			needed = maxH
 		}
 	}
-	procReleaseDC.Call(hwnd, hdcMeasure)
+	return
+}
 
+func (o *Overlay) syncSize(hwnd uintptr) {
+	hdc, _, _ := procGetDC.Call(hwnd)
+	if hdc == 0 {
+		return
+	}
+	_, _, _, _, needed := o.layoutRows(hdc)
+	procReleaseDC.Call(hwnd, hdc)
 	var rc rect
 	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
 	if rc.Bottom != needed {
 		procSetWindowPos.Call(hwnd, 0, 0, 0, uintptr(winW), uintptr(needed), swpNoMove|swpNoActivate|swpNoZOrder)
 	}
+}
 
+func (o *Overlay) paint(hwnd uintptr) {
 	var ps paintStruct
 	hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 	if hdc == 0 {
@@ -606,6 +640,8 @@ func (o *Overlay) paint(hwnd uintptr) {
 	}
 	defer procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
 
+	rows, font, minH, gap, _ := o.layoutRows(hdc)
+	var rc rect
 	procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
 	brush, _, _ := procCreateSolidBrush.Call(chromaKey)
 	procFillRect.Call(hdc, uintptr(unsafe.Pointer(&rc)), brush)
