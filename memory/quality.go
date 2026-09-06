@@ -6,6 +6,27 @@ import (
 	"unicode/utf8"
 )
 
+// WindowToString 把一段内存窗解成可抽句的文本。NUL 改成换行，不在第一个 0 处截断。
+func WindowToString(data []byte, enc string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	if enc == "utf-16le" || enc == "utf-16" {
+		var b strings.Builder
+		b.Grow(len(data) / 2)
+		for i := 0; i+1 < len(data); i += 2 {
+			r := rune(uint16(data[i]) | uint16(data[i+1])<<8)
+			if r == 0 {
+				b.WriteByte('\n')
+				continue
+			}
+			b.WriteRune(r)
+		}
+		return b.String()
+	}
+	return strings.ReplaceAll(string(data), "\x00", "\n")
+}
+
 // ExtractUTF8Strings 按 0x00 切开窗口里的 C 字符串，丢掉非法 UTF-8。
 func ExtractUTF8Strings(data []byte) []string {
 	if len(data) == 0 {

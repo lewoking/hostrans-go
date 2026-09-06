@@ -120,7 +120,7 @@ func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
 			return false
 		}
 	}
-	if len(m.buffers) >= 16 {
+	if len(m.buffers) >= 32 {
 		// 优先丢掉还没见过韩文的槽，避免输入框前缀占满
 		drop := 0
 		for i, b := range m.buffers {
@@ -253,13 +253,14 @@ func (m *Monitor) Tick(sink Sink) {
 		bufs[i].fail = 0
 		// 多读一段，同一页里新冒出来的韩文也能抓到，不必等下一轮全堆扫描
 		if win, werr := p.ReadMemory(bufs[i].addr, 2048); werr == nil && len(win) > 0 {
-			raw = string(win)
+			chunk := win
 			const back = 256
 			if bufs[i].addr > back {
 				if pre, perr := p.ReadMemory(bufs[i].addr-back, back); perr == nil && len(pre) > 0 {
-					raw = string(append(pre, win...))
+					chunk = append(pre, win...)
 				}
 			}
+			raw = memory.WindowToString(chunk, bufs[i].enc)
 		}
 		if raw == "" || raw == bufs[i].last {
 			continue

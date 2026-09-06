@@ -158,10 +158,10 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 		}
 		enc := encs[i]
 		for _, addr := range addrs {
-			raw, rerr := p.ReadString(addr, 1024, enc)
-			if rerr != nil || !memory.LooksLikeChat(raw) {
+			if !worthWatching(p, addr, enc) {
 				continue
 			}
+			raw, _ := p.ReadString(addr, 1024, enc)
 			if m.addBuffer(enc, addr) {
 				added++
 				debugLog("passive keep enc=%s addr=%x raw=%q", enc, addr, clipLog(raw))
@@ -175,8 +175,19 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 	if log != nil && added > 0 {
 		log(fmt.Sprintf("定位 +%d", added))
 	}
-	debugLog("passive locate added=%d total=%d rawHits=%d", added, m.BufferCount(), hitTotal)
+	dlog.Infof("passive locate added=%d total=%d rawHits=%d", added, m.BufferCount(), hitTotal)
 	return nil
+}
+
+func worthWatching(p *memory.Process, addr uintptr, enc string) bool {
+	if raw, err := p.ReadString(addr, 1024, enc); err == nil && memory.LooksLikeChat(raw) {
+		return true
+	}
+	win, err := p.ReadMemory(addr, 2048)
+	if err != nil || len(win) == 0 {
+		return false
+	}
+	return len(memory.ChatCandidates(memory.WindowToString(win, enc))) > 0
 }
 
 func sleepStop(d time.Duration, stop <-chan struct{}) bool {
@@ -216,7 +227,7 @@ func (m *Monitor) AutoInit(stop <-chan struct{}, sink Sink) {
 			}
 			lastCount = n
 		}
-		wait := 20 * time.Second
+		wait := 8 * time.Second
 		if m.BufferCount() == 0 {
 			wait = 3 * time.Second
 		}
