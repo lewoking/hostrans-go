@@ -62,7 +62,6 @@ const (
 	dtSingleLine   = 0x0020
 	transparent    = 1
 	fwNormal       = 400
-	fwBold         = 700
 	defaultChar    = 1
 	idcArrow       = 32512
 	idiApplication = 32512
@@ -130,12 +129,10 @@ type msg struct {
 }
 
 type Overlay struct {
-	hwnd          uintptr
-	fontChat      uintptr
-	fontChatIdle  uintptr
-	fontAlert     uintptr
-	fontAlertIdle uintptr
-	fontHint      uintptr
+	hwnd         uintptr
+	fontChat     uintptr
+	fontChatIdle uintptr
+	fontHint     uintptr
 
 	mu         sync.Mutex
 	lines      []Line
@@ -365,18 +362,6 @@ func (o *Overlay) Run() error {
 		defaultChar, 0, 0, 0, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
-	o.fontAlert, _, _ = procCreateFontW.Call(
-		fontHeight(chatFontPx),
-		0, 0, 0, fwBold, 0, 0, 0,
-		defaultChar, 0, 0, 0, 0,
-		uintptr(unsafe.Pointer(face)),
-	)
-	o.fontAlertIdle, _, _ = procCreateFontW.Call(
-		fontHeight(chatFontPx/idleFontDiv),
-		0, 0, 0, fwBold, 0, 0, 0,
-		defaultChar, 0, 0, 0, 0,
-		uintptr(unsafe.Pointer(face)),
-	)
 
 	modFlags := uintptr(modControl | modNoRepeat)
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
@@ -402,12 +387,6 @@ func (o *Overlay) Run() error {
 	}
 	if o.fontHint != 0 {
 		procDeleteObject.Call(o.fontHint)
-	}
-	if o.fontAlert != 0 {
-		procDeleteObject.Call(o.fontAlert)
-	}
-	if o.fontAlertIdle != 0 {
-		procDeleteObject.Call(o.fontAlertIdle)
 	}
 	active = nil
 	return nil
@@ -549,6 +528,7 @@ func (o *Overlay) onIdleTimer(hwnd uintptr) {
 type layoutRow struct {
 	who, text string
 	ww, h     int32
+	minH      int32
 	alert     bool
 	font      uintptr
 }
@@ -611,11 +591,15 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 			continue
 		}
 		rowFont := font
+		rowMinH := minH
 		if ln.Alert {
-			if idle && o.fontAlertIdle != 0 {
-				rowFont = o.fontAlertIdle
-			} else if o.fontAlert != 0 {
-				rowFont = o.fontAlert
+			if idle {
+				if o.fontChatIdle != 0 {
+					rowFont = o.fontChatIdle
+				}
+			} else if o.fontHint != 0 {
+				rowFont = o.fontHint
+				rowMinH = int32(hintFontPx + 2)
 			}
 		}
 		who := ln.Speaker
@@ -626,16 +610,16 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := measureTextH(hdc, rowFont, ww+2, minH, who)
-		h2 := measureTextH(hdc, rowFont, winW-28-ww, minH, ln.Text)
+		h1 := measureTextH(hdc, rowFont, ww+2, rowMinH, who)
+		h2 := measureTextH(hdc, rowFont, winW-28-ww, rowMinH, ln.Text)
 		h := h1
 		if h2 > h {
 			h = h2
 		}
-		if h < minH {
-			h = minH
+		if h < rowMinH {
+			h = rowMinH
 		}
-		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h, alert: ln.Alert, font: rowFont})
+		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h, minH: rowMinH, alert: ln.Alert, font: rowFont})
 		if len(rows) >= maxChat {
 			break
 		}
@@ -734,7 +718,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
-	alertRed := rgb(255, 96, 72)
+	alertGray := rgb(150, 150, 150)
 	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
 
 	y := int32(padTop)
@@ -749,10 +733,14 @@ func (o *Overlay) paint(hwnd uintptr) {
 		}
 		whoColor, textColor := teamBlue, chatWhite
 		if row.alert {
-			whoColor, textColor = alertRed, alertRed
+			whoColor, textColor = alertGray, alertGray
 		}
-		h1 := draw(rowFont, 14, y, row.ww+2, minH, whoColor, row.who)
-		h2 := draw(rowFont, 14+row.ww, y, winW-28-row.ww, minH, textColor, row.text)
+		floor := row.minH
+		if floor == 0 {
+			floor = minH
+		}
+		h1 := draw(rowFont, 14, y, row.ww+2, floor, whoColor, row.who)
+		h2 := draw(rowFont, 14+row.ww, y, winW-28-row.ww, floor, textColor, row.text)
 		h := h1
 		if h2 > h {
 			h = h2
