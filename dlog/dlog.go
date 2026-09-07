@@ -13,16 +13,27 @@ import (
 const (
 	LevelDebug = 0
 	LevelInfo  = 1
+	LevelError = 2
 )
 
 // Version 由 -ldflags "-X hostrans/dlog.Version=v0.5.4" 注入；空或 dev 视为 1.0 前。
 var Version = "dev"
 
 var (
-	mu     sync.Mutex
-	path   string
-	trunc  = true
+	mu    sync.Mutex
+	path  string
+	trunc = true
+
+	alertMu sync.Mutex
+	onAlert func(string)
 )
+
+// SetAlert 注册 error 级告警回调（例如推到悬浮窗）。
+func SetAlert(fn func(string)) {
+	alertMu.Lock()
+	onAlert = fn
+	alertMu.Unlock()
+}
 
 func Path() string {
 	initFile()
@@ -91,6 +102,24 @@ func Debugf(format string, args ...interface{}) {
 
 func Infof(format string, args ...interface{}) {
 	write("INF", format, args...)
+}
+
+func Errorf(format string, args ...interface{}) {
+	write("ERR", format, args...)
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	r := []rune(msg)
+	if len(r) > 48 {
+		msg = string(r[:48]) + "…"
+	}
+	alertMu.Lock()
+	fn := onAlert
+	alertMu.Unlock()
+	if fn != nil {
+		fn(msg)
+	}
 }
 
 // Printf 兼容旧调用：1.0 前当 debug，1.0 起不再刷屏。

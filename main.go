@@ -46,6 +46,10 @@ func main() {
 	go trans.Warmup()
 	mon := monitor.New(trans)
 	ov := ui.NewOverlay()
+	dlog.SetAlert(func(msg string) {
+		ov.Alert(msg)
+		ov.Show()
+	})
 
 	ov.OnTranslateInput = func() {
 		ov.Stay()

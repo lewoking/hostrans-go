@@ -33,6 +33,10 @@ func (o *Overlay) Status(msg string) {
 	fmt.Println("[状态]", msg)
 }
 
+func (o *Overlay) Alert(msg string) {
+	fmt.Println("[错误]", msg)
+}
+
 func (o *Overlay) Show() {}
 func (o *Overlay) Stay() {}
 func (o *Overlay) Hide() {}

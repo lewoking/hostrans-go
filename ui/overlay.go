@@ -4,4 +4,5 @@ type Line struct {
 	Speaker string
 	Text    string
 	Status  bool
+	Alert   bool
 }

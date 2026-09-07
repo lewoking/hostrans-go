@@ -30,14 +30,14 @@ const (
 	swpShowWindow = 0x0040
 	swpNoZOrder   = 0x0004
 
-	wmPaint     = 0x000F
-	wmDestroy   = 0x0002
-	wmLButtonUp = 0x0202
-	wmHotkey    = 0x0312
-	wmNChitTest = 0x0084
-	wmEraseBk   = 0x0014
-	wmClose     = 0x0010
-	wmApp       = 0x8000
+	wmPaint      = 0x000F
+	wmDestroy    = 0x0002
+	wmLButtonUp  = 0x0202
+	wmHotkey     = 0x0312
+	wmNChitTest  = 0x0084
+	wmEraseBk    = 0x0014
+	wmClose      = 0x0010
+	wmApp        = 0x8000
 	wmAppRedraw  = wmApp + 1
 	wmAppHide    = wmApp + 2
 	wmAppShow    = wmApp + 3
@@ -55,16 +55,18 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 
-	dtLeft       = 0x0000
-	dtWordBreak  = 0x0010
-	dtNoPrefix   = 0x0800
-	dtCalcRect   = 0x0400
-	dtSingleLine = 0x0020
-	transparent = 1
-	fwNormal    = 400
-	defaultChar = 1
-	idcArrow    = 32512
-	colorWindow = 5
+	dtLeft         = 0x0000
+	dtWordBreak    = 0x0010
+	dtNoPrefix     = 0x0800
+	dtCalcRect     = 0x0400
+	dtSingleLine   = 0x0020
+	transparent    = 1
+	fwNormal       = 400
+	fwBold         = 700
+	defaultChar    = 1
+	idcArrow       = 32512
+	idiApplication = 32512
+	colorWindow    = 5
 
 	hotShow    = 2
 	hotTransIn = 3
@@ -128,10 +130,12 @@ type msg struct {
 }
 
 type Overlay struct {
-	hwnd         uintptr
-	fontChat     uintptr
-	fontChatIdle uintptr
-	fontHint     uintptr
+	hwnd          uintptr
+	fontChat      uintptr
+	fontChatIdle  uintptr
+	fontAlert     uintptr
+	fontAlertIdle uintptr
+	fontHint      uintptr
 
 	mu         sync.Mutex
 	lines      []Line
@@ -162,6 +166,7 @@ var (
 	procSetWindowPos               = user32.NewProc("SetWindowPos")
 	procDestroyWindow              = user32.NewProc("DestroyWindow")
 	procLoadCursorW                = user32.NewProc("LoadCursorW")
+	procLoadIconW                  = user32.NewProc("LoadIconW")
 	procBeginPaint                 = user32.NewProc("BeginPaint")
 	procEndPaint                   = user32.NewProc("EndPaint")
 	procFillRect                   = user32.NewProc("FillRect")
@@ -201,6 +206,14 @@ func fontHeight(px int) uintptr {
 	return ^uintptr(px-1) + 1
 }
 
+func loadAppIcon(mod uintptr) uintptr {
+	ico, _, _ := procLoadIconW.Call(mod, 1)
+	if ico == 0 {
+		ico, _, _ = procLoadIconW.Call(0, idiApplication)
+	}
+	return ico
+}
+
 func NewOverlay() *Overlay {
 	return &Overlay{visible: true}
 }
@@ -220,6 +233,33 @@ func (o *Overlay) Push(speaker, text string) {
 
 func (o *Overlay) Status(msg string) {
 	// 路径/版本/状态不进悬浮窗
+}
+
+func (o *Overlay) Alert(msg string) {
+	if msg == "" {
+		return
+	}
+	o.mu.Lock()
+	if n := len(o.lines); n > 0 {
+		last := o.lines[n-1]
+		if last.Alert && last.Text == msg {
+			o.idle = false
+			o.lastActive = time.Now()
+			o.mu.Unlock()
+			o.redraw()
+			o.armIdle()
+			return
+		}
+	}
+	o.idle = false
+	o.lastActive = time.Now()
+	o.lines = append(o.lines, Line{Speaker: "错误", Text: msg, Alert: true})
+	if len(o.lines) > maxChat {
+		o.lines = o.lines[len(o.lines)-maxChat:]
+	}
+	o.mu.Unlock()
+	o.redraw()
+	o.armIdle()
 }
 
 func (o *Overlay) Show() {
@@ -325,11 +365,22 @@ func (o *Overlay) Run() error {
 		defaultChar, 0, 0, 0, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
+	o.fontAlert, _, _ = procCreateFontW.Call(
+		fontHeight(chatFontPx),
+		0, 0, 0, fwBold, 0, 0, 0,
+		defaultChar, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(face)),
+	)
+	o.fontAlertIdle, _, _ = procCreateFontW.Call(
+		fontHeight(chatFontPx/idleFontDiv),
+		0, 0, 0, fwBold, 0, 0, 0,
+		defaultChar, 0, 0, 0, 0,
+		uintptr(unsafe.Pointer(face)),
+	)
 
 	modFlags := uintptr(modControl | modNoRepeat)
 	procRegisterHotKey.Call(hwnd, hotShow, modFlags, vkTab)
 	procRegisterHotKey.Call(hwnd, hotTransIn, modFlags, vkP)
-	startTray(func() { o.Close() })
 
 	var m msg
 	for {
@@ -341,7 +392,6 @@ func (o *Overlay) Run() error {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 
-	stopTray()
 	procUnregisterHotKey.Call(hwnd, hotShow)
 	procUnregisterHotKey.Call(hwnd, hotTransIn)
 	if o.fontChat != 0 {
@@ -352,6 +402,12 @@ func (o *Overlay) Run() error {
 	}
 	if o.fontHint != 0 {
 		procDeleteObject.Call(o.fontHint)
+	}
+	if o.fontAlert != 0 {
+		procDeleteObject.Call(o.fontAlert)
+	}
+	if o.fontAlertIdle != 0 {
+		procDeleteObject.Call(o.fontAlertIdle)
 	}
 	active = nil
 	return nil
@@ -415,11 +471,6 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 			if o.OnTranslateInput != nil {
 				go o.OnTranslateInput()
 			}
-		}
-		return 0
-	case wmTray:
-		if lParam == wmRButtonUp || lParam == wmLButtonUp {
-			showTrayMenu(hwnd)
 		}
 		return 0
 	case wmAppIdleArm:
@@ -498,6 +549,8 @@ func (o *Overlay) onIdleTimer(hwnd uintptr) {
 type layoutRow struct {
 	who, text string
 	ww, h     int32
+	alert     bool
+	font      uintptr
 }
 
 func measureTextW(hdc, font uintptr, s string) int32 {
@@ -557,16 +610,24 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 		if ln.Status {
 			continue
 		}
+		rowFont := font
+		if ln.Alert {
+			if idle && o.fontAlertIdle != 0 {
+				rowFont = o.fontAlertIdle
+			} else if o.fontAlert != 0 {
+				rowFont = o.fontAlert
+			}
+		}
 		who := ln.Speaker
 		if who != "" {
 			who += "："
 		}
-		ww := measureTextW(hdc, font, who)
+		ww := measureTextW(hdc, rowFont, who)
 		if ww > winW-80 {
 			ww = winW - 80
 		}
-		h1 := measureTextH(hdc, font, ww+2, minH, who)
-		h2 := measureTextH(hdc, font, winW-28-ww, minH, ln.Text)
+		h1 := measureTextH(hdc, rowFont, ww+2, minH, who)
+		h2 := measureTextH(hdc, rowFont, winW-28-ww, minH, ln.Text)
 		h := h1
 		if h2 > h {
 			h = h2
@@ -574,7 +635,7 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 		if h < minH {
 			h = minH
 		}
-		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h})
+		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h, alert: ln.Alert, font: rowFont})
 		if len(rows) >= maxChat {
 			break
 		}
@@ -673,6 +734,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
+	alertRed := rgb(255, 96, 72)
 	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
 
 	y := int32(padTop)
@@ -681,8 +743,16 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if y >= maxY {
 			break
 		}
-		h1 := draw(font, 14, y, row.ww+2, minH, teamBlue, row.who)
-		h2 := draw(font, 14+row.ww, y, winW-28-row.ww, minH, chatWhite, row.text)
+		rowFont := row.font
+		if rowFont == 0 {
+			rowFont = font
+		}
+		whoColor, textColor := teamBlue, chatWhite
+		if row.alert {
+			whoColor, textColor = alertRed, alertRed
+		}
+		h1 := draw(rowFont, 14, y, row.ww+2, minH, whoColor, row.who)
+		h2 := draw(rowFont, 14+row.ww, y, winW-28-row.ww, minH, textColor, row.text)
 		h := h1
 		if h2 > h {
 			h = h2
