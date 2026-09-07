@@ -422,20 +422,21 @@ func (m *Monitor) TranslateInput(sink Sink) {
 			sink.Show()
 		}
 		return
+	case memory.InputChinese:
+		dst, err := m.Trans.Translate(src, "zh", "en")
+		if err != nil || dst == "" || looksLikeFailure(dst) {
+			debugLog("zh→en fail src=%q err=%v dst=%q", src, err, dst)
+			return
+		}
+		debugLog("zh→en src=%q dst=%q", src, dst)
+		if err := memory.TranslateChatBox(p.PID, dst); err != nil {
+			debugLog("fill-back fail: %v", err)
+			return
+		}
+		m.mu.Lock()
+		m.lastMine = dst
+		m.mu.Unlock()
 	}
-	dst, err := m.Trans.Translate(src, "zh", "ko")
-	if err != nil {
-		debugLog("zh→ko fail src=%q err=%v", src, err)
-		return
-	}
-	debugLog("zh→ko src=%q dst=%q", src, dst)
-	if err := memory.TranslateChatBox(p.PID, dst); err != nil {
-		debugLog("fill-back fail: %v", err)
-		return
-	}
-	m.mu.Lock()
-	m.lastMine = dst
-	m.mu.Unlock()
 }
 
 func trimChat(s string) string {

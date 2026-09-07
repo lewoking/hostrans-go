@@ -79,7 +79,7 @@ const (
 
 	chatFontPx  = 18
 	hintFontPx  = 12
-	idleFontDiv = 5
+	idleFontDiv = 3
 
 	spiGetWorkArea = 0x0030
 	smCxScreen     = 0

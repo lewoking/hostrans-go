@@ -308,7 +308,13 @@ func PasteToGame(pid uint32, text string) error {
 	return nil
 }
 
-// TranslateChatBox 全选后用 Unicode 输入译文（不 Ctrl+V）。
+// TranslateChatBox 全选后用 Unicode 输入译文并回车发送（不 Ctrl+V）。
 func TranslateChatBox(pid uint32, translated string) error {
-	return PasteToGame(pid, translated)
+	if err := PasteToGame(pid, translated); err != nil {
+		return err
+	}
+	time.Sleep(80 * time.Millisecond)
+	tap(vkReturn)
+	time.Sleep(80 * time.Millisecond)
+	return nil
 }

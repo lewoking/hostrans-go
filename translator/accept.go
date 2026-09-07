@@ -23,6 +23,15 @@ func hasHan(s string) bool {
 	return false
 }
 
+func hasLatin(s string) bool {
+	for _, r := range s {
+		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' {
+			return true
+		}
+	}
+	return false
+}
+
 // AcceptTranslation 拒绝原样返回、以及没写成目标语言的结果。
 func AcceptTranslation(src, dst, to string) bool {
 	src = strings.TrimSpace(src)
@@ -38,6 +47,8 @@ func AcceptTranslation(src, dst, to string) bool {
 		return hasHangul(dst)
 	case "zh", "zh-cn", "zh-hans", "chinese":
 		return hasHan(dst)
+	case "en", "eng", "english":
+		return hasLatin(dst) && !hasHan(dst)
 	default:
 		return true
 	}
