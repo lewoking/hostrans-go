@@ -20,9 +20,8 @@ const (
 var Version = "dev"
 
 var (
-	mu    sync.Mutex
-	path  string
-	trunc = true
+	mu   sync.Mutex
+	path string
 
 	alertMu sync.Mutex
 	onAlert func(string)
@@ -78,13 +77,7 @@ func write(level, format string, args ...interface{}) {
 	initFile()
 	mu.Lock()
 	defer mu.Unlock()
-	flags := os.O_CREATE | os.O_WRONLY
-	if trunc {
-		flags |= os.O_TRUNC
-		trunc = false
-	} else {
-		flags |= os.O_APPEND
-	}
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	f, err := os.OpenFile(path, flags, 0644)
 	if err != nil {
 		return
