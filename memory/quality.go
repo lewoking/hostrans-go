@@ -145,6 +145,9 @@ func isUtterance(line ChatLine) bool {
 	if !KnownChannel(line.Channel) {
 		return false
 	}
+	if isTemplateText(body) || isTemplateText(line.Speaker) {
+		return false
+	}
 	if NeedsTranslate(body) {
 		hangul := 0
 		for _, r := range body {
@@ -164,7 +167,7 @@ func looksLikeName(s string) bool {
 	if !isSpeaker(s) {
 		return false
 	}
-	if chatLineRe.MatchString(s) {
+	if chatNamedRe.MatchString(s) || chatPlainRe.MatchString(s) {
 		return false
 	}
 	if strings.ContainsAny(s, ":： 	") {

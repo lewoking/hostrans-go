@@ -10,9 +10,10 @@ import (
 var (
 	colorTagRe = regexp.MustCompile(`(?i)</?c\b[^>]*>`)
 	anyTagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
-	hangulRe   = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
-	// 转码剥标签之后：已知频道] + 可选「名字:」+ 正文。口：Prada 对不上频道，丢掉。
-	chatLineRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*(.*)$`)
+	hangulRe = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
+	// 剥标签后只认两种：频道]名字:正文  或  频道]:正文。不含 <>% 。
+	chatNamedRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*([^<>%\[\]【】\n:：]{1,24})\s*[:：]\s*([^<>%\n]+)$`)
+	chatPlainRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*[:：]\s*([^<>%\n]+)$`)
 )
 
 var uiNoise = []string{
@@ -47,7 +48,7 @@ func stripTags(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// ParseChatLine 转码后的文本：正则拆 频道]名字:内容。
+// ParseChatLine 转码剥标签后，正则只拆干净的 频道]名字:内容。
 func ParseChatLine(raw string) ChatLine {
 	line := ChatLine{Raw: raw}
 	s := stripTags(raw)
@@ -60,26 +61,17 @@ func ParseChatLine(raw string) ChatLine {
 			s = rest
 		}
 	}
-	m := chatLineRe.FindStringSubmatch(s)
-	if m == nil {
+	if m := chatNamedRe.FindStringSubmatch(s); m != nil {
+		line.Channel = m[1]
+		line.Speaker = strings.TrimSpace(m[2])
+		line.Text = strings.TrimSpace(m[3])
 		return line
 	}
-	line.Channel = m[1]
-	s = strings.TrimSpace(m[2])
-	s = strings.TrimLeft(s, ":： 	")
-	if s == "" {
+	if m := chatPlainRe.FindStringSubmatch(s); m != nil {
+		line.Channel = m[1]
+		line.Text = strings.TrimSpace(m[2])
 		return line
 	}
-	if i := strings.IndexAny(s, ":："); i > 0 {
-		left := strings.TrimSpace(s[:i])
-		right := strings.TrimSpace(s[i+1:])
-		if isSpeaker(left) && right != "" {
-			line.Speaker = left
-			line.Text = right
-			return line
-		}
-	}
-	line.Text = s
 	return line
 }
 
@@ -107,11 +99,24 @@ func isSpeaker(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if r == '\n' || r == '\r' || r == '\uFFFD' {
+		if r == '\n' || r == '\r' || r == '\uFFFD' || r == '%' {
 			return false
 		}
 	}
 	return true
+}
+
+func isTemplateText(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.Contains(s, "%senderName%") || strings.Contains(s, "%message%") || strings.Contains(s, "%presenceId%") {
+		return true
+	}
+	if strings.Contains(s, "storm_ui_") || strings.Contains(s, ".dds") {
+		return true
+	}
+	return strings.Contains(s, "%")
 }
 
 // ShouldSkip 过滤 UI 占位、空行、自己发出的探测串等。
@@ -130,6 +135,9 @@ func ShouldSkip(line ChatLine, myProbes map[string]struct{}) bool {
 		body = s
 	}
 	if strings.TrimSpace(body) == "" {
+		return true
+	}
+	if isTemplateText(s) || isTemplateText(body) || isTemplateText(line.Speaker) {
 		return true
 	}
 	if myProbes != nil {

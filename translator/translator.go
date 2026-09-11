@@ -77,6 +77,11 @@ func (m *Manager) Translate(text, from, to string) (string, error) {
 		dlog.Infof("trans skip over %d tokens src=%q", maxChatTokens, clipRunes(text, 80))
 		return "", fmt.Errorf("翻译失败")
 	}
+	if strings.ContainsAny(text, "<>%") || strings.Contains(text, "storm_ui_") || strings.Contains(text, ".dds") {
+		dlog.Infof("trans skip dirty src=%q", clipRunes(text, 80))
+		return "", fmt.Errorf("翻译失败")
+	}
+	dlog.Infof("trans src=%q", clipRunes(text, 80))
 	key := cacheKey(text, from, to)
 	m.mu.Lock()
 	if v, ok := m.cache[key]; ok {

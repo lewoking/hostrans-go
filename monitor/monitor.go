@@ -338,6 +338,7 @@ func (m *Monitor) emitLine(line memory.ChatLine, lastMine string, probes map[str
 		return
 	}
 	who := memory.DisplayWho(line)
+	dlog.Infof("chat who=%q body=%q", who, body)
 	if !memory.NeedsTranslate(body) {
 		debugLog("queue chat speaker=%q body=%q", who, body)
 		if sink != nil {
@@ -380,6 +381,9 @@ func (m *Monitor) RunTranslators(n int, stop <-chan struct{}, sink Sink) {
 					if err != nil || zh == "" || looksLikeFailure(zh) {
 						debugLog("ko→zh fail speaker=%q body=%q err=%v dst=%q", job.speaker, job.body, err, zh)
 						dlog.Errorf("翻译失败")
+						if strings.ContainsAny(job.body, "<>%") || strings.Contains(job.body, "storm_ui_") || strings.Contains(job.body, ".dds") {
+							continue
+						}
 						sink.Push(job.speaker, job.body)
 						sink.Show()
 						continue
