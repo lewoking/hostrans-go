@@ -10,8 +10,9 @@ import (
 var (
 	colorTagRe = regexp.MustCompile(`(?i)</?c\b[^>]*>`)
 	anyTagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
-	channelRe = regexp.MustCompile(`^\s*[\[【]?([^\[\]【】\n]+?)[\]】]\s*`)
 	hangulRe   = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
+	// 转码剥标签之后：已知频道] + 可选「名字:」+ 正文。口：Prada 对不上频道，丢掉。
+	chatLineRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*(.*)$`)
 )
 
 var uiNoise = []string{
@@ -46,31 +47,29 @@ func stripTags(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// ParseChatLine 从内存原文提取说话人和正文。
+// ParseChatLine 转码后的文本：正则拆 频道]名字:内容。
 func ParseChatLine(raw string) ChatLine {
 	line := ChatLine{Raw: raw}
 	s := stripTags(raw)
 	if s == "" {
 		return line
 	}
-	// 多行时取最后一条有内容的
 	if i := strings.LastIndexAny(s, "\r\n"); i >= 0 {
 		rest := strings.TrimSpace(s[i+1:])
 		if rest != "" {
 			s = rest
 		}
 	}
-
-	if m := channelRe.FindStringSubmatch(s); m != nil {
-		line.Channel = strings.TrimSpace(m[1])
-		s = strings.TrimSpace(s[len(m[0]):])
+	m := chatLineRe.FindStringSubmatch(s)
+	if m == nil {
+		return line
 	}
-
-	s = strings.TrimLeft(s, ":： ")
+	line.Channel = m[1]
+	s = strings.TrimSpace(m[2])
+	s = strings.TrimLeft(s, ":： 	")
 	if s == "" {
 		return line
 	}
-
 	if i := strings.IndexAny(s, ":："); i > 0 {
 		left := strings.TrimSpace(s[:i])
 		right := strings.TrimSpace(s[i+1:])
@@ -80,7 +79,6 @@ func ParseChatLine(raw string) ChatLine {
 			return line
 		}
 	}
-
 	line.Text = s
 	return line
 }

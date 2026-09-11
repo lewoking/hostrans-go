@@ -179,6 +179,7 @@ func markerTag(s string) string {
 	return chatMarkers[0]
 }
 
+// inspectWatch：模糊命中后转码，再靠 ChatCandidates 正则决定留或丢。
 func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draft bool) {
 	raw, _ := p.ReadString(addr, 1024, enc)
 	winText := ""

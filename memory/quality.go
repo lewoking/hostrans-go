@@ -164,7 +164,7 @@ func looksLikeName(s string) bool {
 	if !isSpeaker(s) {
 		return false
 	}
-	if channelRe.MatchString(s) {
+	if chatLineRe.MatchString(s) {
 		return false
 	}
 	if strings.ContainsAny(s, ":： 	") {
