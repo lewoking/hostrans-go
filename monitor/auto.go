@@ -12,6 +12,7 @@ import (
 var chatMarkers = []string{
 	`[征召`,
 	`[房间`,
+	`团队]`,
 }
 
 func clipLog(s string) string {
@@ -153,9 +154,11 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 			raw, _ := p.ReadString(addr, 1024, enc)
 			if m.insertBuffer(buffer{addr: addr, enc: enc, hangul: hangul, draft: draft}) {
 				added++
-				tag := "[房间"
+				tag := "团队]"
 				if draft {
 					tag = "[征召"
+				} else if strings.Contains(raw, "[房间") {
+					tag = "[房间"
 				}
 				dlog.Infof("watch %s enc=%s addr=%x raw=%q", tag, enc, addr, clipLog(raw))
 			}
@@ -184,8 +187,9 @@ func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draf
 	}
 	draft = isDraftChannel(raw) || isDraftChannel(winText)
 	room := strings.Contains(raw, "[房间") || strings.Contains(winText, "[房间")
+	team := strings.Contains(raw, "团队]") || strings.Contains(winText, "团队]")
 	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
-	if draft || room {
+	if draft || room || team {
 		return true, hangul, draft
 	}
 	return false, false, false
