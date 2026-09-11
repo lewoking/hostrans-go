@@ -11,22 +11,13 @@ import (
 
 var chatMarkers = []string{
 	`征召团队`,
-	`[征召团队]:`,
-	`<c val="3184FF">[征召团队]:</c>`,
-	`<c val="3184FF">[团队]:</c>`,
-	`<c val="3184FF">[队伍]:</c>`,
-	`[团队]:`,
-	`[队伍]:`,
-	`[组队]:`,
-	`团队]`,
-	`[征召团队]`,
-	`[房间]`,
-	`[팀]`,
-	`[전체]`,
-	`[All]`,
-	`[Team]`,
-	`[Party]`,
-	`综合 한국어`,
+	`征召队伍`,
+	`房间`,
+	`团队`,
+	`队伍`,
+	`组队`,
+	`팀`,
+	`전체`,
 }
 
 func clipLog(s string) string {
@@ -187,13 +178,17 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 	return nil
 }
 
+func isDraftChannel(s string) bool {
+	return strings.Contains(s, "征召团队") || strings.Contains(s, "征召队伍")
+}
+
 func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draft bool) {
 	raw, _ := p.ReadString(addr, 1024, enc)
 	winText := ""
 	if win, err := p.ReadMemory(addr, 2048); err == nil && len(win) > 0 {
 		winText = memory.WindowToString(win, enc)
 	}
-	draft = strings.Contains(raw, "征召团队") || strings.Contains(winText, "征召团队")
+	draft = isDraftChannel(raw) || isDraftChannel(winText)
 	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
 	if draft || memory.LooksLikeChat(raw) || len(memory.ChatCandidates(winText)) > 0 || len(memory.ChatCandidates(raw)) > 0 {
 		return true, hangul, draft
