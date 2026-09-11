@@ -110,7 +110,7 @@ func ChatCandidates(raw string) []ChatLine {
 				lastName = stripTags(piece)
 				continue
 			}
-			if line.Speaker == "" && lastName != "" {
+			if line.Speaker == "" && lastName != "" && line.Channel == "" {
 				line.Speaker = lastName
 			}
 			if !isUtterance(line) {
@@ -142,7 +142,7 @@ func isUtterance(line ChatLine) bool {
 	if n == 0 || n > 512 {
 		return false
 	}
-	if line.Channel == "" && line.Speaker == "" && !NeedsTranslate(body) {
+	if !KnownChannel(line.Channel) {
 		return false
 	}
 	if NeedsTranslate(body) {
@@ -169,6 +169,12 @@ func looksLikeName(s string) bool {
 	}
 	if strings.ContainsAny(s, ":： 	") {
 		return false
+	}
+	if n := utf8.RuneCountInString(s); n == 1 {
+		r := []rune(s)[0]
+		if !(r >= 0xAC00 && r <= 0xD7AF || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9') {
+			return false
+		}
 	}
 	if ContainsKorean(s) && (utf8.RuneCountInString(s) > 8 || strings.ContainsAny(s, ".,!?，。！？")) {
 		return false

@@ -85,6 +85,18 @@ func ParseChatLine(raw string) ChatLine {
 	return line
 }
 
+func KnownChannel(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, ok := channelNames[strings.ToLower(s)]
+	if ok {
+		return true
+	}
+	_, ok = channelNames[s]
+	return ok
+}
+
 func isSpeaker(s string) bool {
 	if s == "" {
 		return false
@@ -97,7 +109,7 @@ func isSpeaker(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if r == '\n' || r == '\r' {
+		if r == '\n' || r == '\r' || r == '\uFFFD' {
 			return false
 		}
 	}

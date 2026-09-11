@@ -10,9 +10,9 @@ import (
 )
 
 var chatMarkers = []string{
-	`队伍]:`,
-	`房间]:`,
-	`团队]:`,
+	`队伍]`,
+	`房间]`,
+	`团队]`,
 }
 
 func clipLog(s string) string {
@@ -186,12 +186,7 @@ func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draf
 		winText = memory.WindowToString(win, enc)
 	}
 	blob := raw + "\n" + winText
-	for _, mk := range chatMarkers {
-		if strings.Contains(blob, mk) {
-			ok = true
-			break
-		}
-	}
+	ok = len(memory.ChatCandidates(blob)) > 0 || strings.Contains(blob, "ChatDisplayHeroIcon")
 	draft = strings.Contains(blob, "征召")
 	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
 	return ok, hangul, draft
