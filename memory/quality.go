@@ -50,7 +50,7 @@ func LooksLikeChat(s string) bool {
 		return false
 	}
 	n := utf8.RuneCountInString(s)
-	if n == 0 || n > 200 {
+	if n == 0 || n > 512 {
 		return false
 	}
 	if strings.ContainsRune(s, '\uFFFD') {

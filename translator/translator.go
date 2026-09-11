@@ -53,12 +53,30 @@ func clipRunes(s string, max int) string {
 	return string(r[:max])
 }
 
+const maxChatTokens = 512
+
+// estimateTokens 游戏聊天粗算：汉字/韩文约 1 token，ASCII 约 4 字 1 token。
+func estimateTokens(s string) int {
+	n, ascii := 0, 0
+	for _, r := range s {
+		if r <= 0x7F {
+			ascii++
+			continue
+		}
+		n++
+	}
+	return n + (ascii+3)/4
+}
+
 func (m *Manager) Translate(text, from, to string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", nil
 	}
-	text = clipRunes(text, 240)
+	if estimateTokens(text) > maxChatTokens {
+		dlog.Infof("trans skip over %d tokens src=%q", maxChatTokens, clipRunes(text, 80))
+		return "", fmt.Errorf("翻译失败")
+	}
 	key := cacheKey(text, from, to)
 	m.mu.Lock()
 	if v, ok := m.cache[key]; ok {

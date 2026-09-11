@@ -139,7 +139,7 @@ func (a *AITranslator) Translate(text, from, to string) (string, error) {
 	payload, err := json.Marshal(responsesReq{
 		Model:           a.model,
 		Input:           buildAIInput(text, from, to),
-		MaxOutputTokens: 64,
+		MaxOutputTokens: 256,
 	})
 	if err != nil {
 		return "", err
