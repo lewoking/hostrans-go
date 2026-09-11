@@ -10,6 +10,9 @@ import (
 )
 
 var chatMarkers = []string{
+	`征召团队`,
+	`[征召团队]:`,
+	`<c val="3184FF">[征召团队]:</c>`,
 	`<c val="3184FF">[团队]:</c>`,
 	`<c val="3184FF">[队伍]:</c>`,
 	`[团队]:`,
@@ -158,13 +161,18 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 		}
 		enc := encs[i]
 		for _, addr := range addrs {
-			if !worthWatching(p, addr, enc) {
+			ok, hangul, draft := inspectWatch(p, addr, enc)
+			if !ok {
 				continue
 			}
 			raw, _ := p.ReadString(addr, 1024, enc)
-			if m.addBuffer(enc, addr) {
+			if m.insertBuffer(buffer{addr: addr, enc: enc, hangul: hangul, draft: draft}) {
 				added++
-				debugLog("passive keep enc=%s addr=%x raw=%q", enc, addr, clipLog(raw))
+				if draft {
+					dlog.Infof("watch draft enc=%s addr=%x raw=%q", enc, addr, clipLog(raw))
+				} else {
+					debugLog("passive keep enc=%s addr=%x raw=%q", enc, addr, clipLog(raw))
+				}
 			}
 		}
 	}
@@ -179,15 +187,18 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 	return nil
 }
 
-func worthWatching(p *memory.Process, addr uintptr, enc string) bool {
-	if raw, err := p.ReadString(addr, 1024, enc); err == nil && memory.LooksLikeChat(raw) {
-		return true
+func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draft bool) {
+	raw, _ := p.ReadString(addr, 1024, enc)
+	winText := ""
+	if win, err := p.ReadMemory(addr, 2048); err == nil && len(win) > 0 {
+		winText = memory.WindowToString(win, enc)
 	}
-	win, err := p.ReadMemory(addr, 2048)
-	if err != nil || len(win) == 0 {
-		return false
+	draft = strings.Contains(raw, "征召团队") || strings.Contains(winText, "征召团队")
+	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
+	if draft || memory.LooksLikeChat(raw) || len(memory.ChatCandidates(winText)) > 0 || len(memory.ChatCandidates(raw)) > 0 {
+		return true, hangul, draft
 	}
-	return len(memory.ChatCandidates(memory.WindowToString(win, enc))) > 0
+	return false, false, false
 }
 
 func sleepStop(d time.Duration, stop <-chan struct{}) bool {

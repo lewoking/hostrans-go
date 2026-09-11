@@ -26,6 +26,7 @@ type buffer struct {
 	last   string
 	fail   int
 	hangul bool
+	draft  bool
 }
 
 type translateJob struct {
@@ -114,25 +115,42 @@ func (m *Monitor) endLocate() {
 }
 
 func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
+	return m.insertBuffer(buffer{addr: addr, enc: enc, hangul: true})
+}
+
+func (m *Monitor) insertBuffer(nb buffer) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for _, b := range m.buffers {
-		if b.addr == addr && b.enc == enc {
+	for i, b := range m.buffers {
+		if b.addr == nb.addr && b.enc == nb.enc {
+			if nb.hangul {
+				m.buffers[i].hangul = true
+			}
+			if nb.draft {
+				m.buffers[i].draft = true
+			}
 			return false
 		}
 	}
 	if len(m.buffers) >= 32 {
-		// 优先丢掉还没见过韩文的槽，避免输入框前缀占满
 		drop := 0
 		for i, b := range m.buffers {
-			if !b.hangul {
+			if !b.hangul && !b.draft {
 				drop = i
 				break
 			}
 		}
+		if m.buffers[drop].draft || m.buffers[drop].hangul {
+			for i, b := range m.buffers {
+				if !b.draft {
+					drop = i
+					break
+				}
+			}
+		}
 		m.buffers = append(m.buffers[:drop], m.buffers[drop+1:]...)
 	}
-	m.buffers = append(m.buffers, buffer{addr: addr, enc: enc, hangul: true})
+	m.buffers = append(m.buffers, nb)
 	return true
 }
 
