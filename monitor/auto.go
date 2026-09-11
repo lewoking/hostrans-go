@@ -10,9 +10,9 @@ import (
 )
 
 var chatMarkers = []string{
-	`[征召`,
-	`[房间`,
-	`团队]`,
+	`队伍]:`,
+	`房间]:`,
+	`团队]:`,
 }
 
 func clipLog(s string) string {
@@ -154,12 +154,7 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 			raw, _ := p.ReadString(addr, 1024, enc)
 			if m.insertBuffer(buffer{addr: addr, enc: enc, hangul: hangul, draft: draft}) {
 				added++
-				tag := "团队]"
-				if draft {
-					tag = "[征召"
-				} else if strings.Contains(raw, "[房间") {
-					tag = "[房间"
-				}
+				tag := markerTag(raw)
 				dlog.Infof("watch %s enc=%s addr=%x raw=%q", tag, enc, addr, clipLog(raw))
 			}
 		}
@@ -175,8 +170,13 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 	return nil
 }
 
-func isDraftChannel(s string) bool {
-	return strings.Contains(s, "[征召")
+func markerTag(s string) string {
+	for _, mk := range chatMarkers {
+		if strings.Contains(s, mk) {
+			return mk
+		}
+	}
+	return chatMarkers[0]
 }
 
 func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draft bool) {
@@ -185,14 +185,16 @@ func inspectWatch(p *memory.Process, addr uintptr, enc string) (ok, hangul, draf
 	if win, err := p.ReadMemory(addr, 2048); err == nil && len(win) > 0 {
 		winText = memory.WindowToString(win, enc)
 	}
-	draft = isDraftChannel(raw) || isDraftChannel(winText)
-	room := strings.Contains(raw, "[房间") || strings.Contains(winText, "[房间")
-	team := strings.Contains(raw, "团队]") || strings.Contains(winText, "团队]")
-	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
-	if draft || room || team {
-		return true, hangul, draft
+	blob := raw + "\n" + winText
+	for _, mk := range chatMarkers {
+		if strings.Contains(blob, mk) {
+			ok = true
+			break
+		}
 	}
-	return false, false, false
+	draft = strings.Contains(blob, "征召")
+	hangul = memory.ContainsKorean(raw) || memory.ContainsKorean(winText)
+	return ok, hangul, draft
 }
 
 func sleepStop(d time.Duration, stop <-chan struct{}) bool {
