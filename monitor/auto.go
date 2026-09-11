@@ -22,8 +22,8 @@ func clipLog(s string) string {
 		}
 		return -1
 	}, s)
-	if len([]rune(s)) > 80 {
-		return string([]rune(s)[:80]) + "…"
+	if len([]rune(s)) > 200 {
+		return string([]rune(s)[:200]) + "…"
 	}
 	return s
 }

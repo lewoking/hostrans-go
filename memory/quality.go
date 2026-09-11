@@ -92,7 +92,7 @@ func LooksLikeChat(s string) bool {
 	return true
 }
 
-// ChatCandidates 从一块原始内存里抽出可翻译的韩文聊天。
+// ChatCandidates 从内存窗抽出聊天行（韩文、中文、英文都要，韩文稍后翻译）。
 func ChatCandidates(raw string) []ChatLine {
 	blobs := ExtractUTF8Strings(append([]byte(raw), 0))
 	if len(blobs) == 0 {
@@ -107,31 +107,22 @@ func ChatCandidates(raw string) []ChatLine {
 			if line.Speaker != "" {
 				lastName = line.Speaker
 			} else if looksLikeName(piece) {
-				lastName = piece
-				continue
-			}
-			if !LooksLikeChat(piece) {
-				continue
-			}
-			body := line.Text
-			if body == "" {
-				body = piece
-			}
-			if !NeedsTranslate(body) && !NeedsTranslate(piece) {
-				continue
-			}
-			if body == "" {
+				lastName = stripTags(piece)
 				continue
 			}
 			if line.Speaker == "" && lastName != "" {
 				line.Speaker = lastName
 			}
-			if line.Text == "" {
-				line.Text = body
+			if !isUtterance(line) {
+				continue
 			}
+			body := line.Text
 			if i, ok := idx[body]; ok {
 				if out[i].Speaker == "" && line.Speaker != "" {
-					out[i] = line
+					out[i].Speaker = line.Speaker
+				}
+				if out[i].Channel == "" && line.Channel != "" {
+					out[i].Channel = line.Channel
 				}
 				continue
 			}
@@ -140,6 +131,32 @@ func ChatCandidates(raw string) []ChatLine {
 		}
 	}
 	return out
+}
+
+func isUtterance(line ChatLine) bool {
+	body := strings.TrimSpace(line.Text)
+	if body == "" {
+		return false
+	}
+	n := utf8.RuneCountInString(body)
+	if n == 0 || n > 512 {
+		return false
+	}
+	if line.Channel == "" && line.Speaker == "" && !NeedsTranslate(body) {
+		return false
+	}
+	if NeedsTranslate(body) {
+		hangul := 0
+		for _, r := range body {
+			if r >= 0xAC00 && r <= 0xD7AF {
+				hangul++
+			}
+		}
+		if hangul*8 < n && n > 24 {
+			return false
+		}
+	}
+	return true
 }
 
 func looksLikeName(s string) bool {

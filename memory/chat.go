@@ -10,7 +10,7 @@ import (
 var (
 	colorTagRe = regexp.MustCompile(`(?i)</?c\b[^>]*>`)
 	anyTagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
-	channelRe  = regexp.MustCompile(`^\s*[\[【]([^\]】]+)[\]】]\s*`)
+	channelRe = regexp.MustCompile(`^\s*[\[【]?([^\[\]【】\n]+?)[\]】]\s*`)
 	hangulRe   = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
 )
 
@@ -155,9 +155,14 @@ func NeedsTranslate(text string) bool {
 	return ContainsKorean(strings.TrimSpace(text))
 }
 
-func DisplaySpeaker(line ChatLine) string {
-	if line.Speaker != "" {
-		return line.Speaker
+func DisplayWho(line ChatLine) string {
+	var b strings.Builder
+	if line.Channel != "" {
+		b.WriteString(line.Channel)
+		b.WriteString("]")
 	}
-	return ""
+	if line.Speaker != "" {
+		b.WriteString(line.Speaker)
+	}
+	return b.String()
 }

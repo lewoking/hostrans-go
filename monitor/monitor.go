@@ -337,11 +337,17 @@ func (m *Monitor) emitLine(line memory.ChatLine, lastMine string, probes map[str
 	if m.seen.Add(body) {
 		return
 	}
+	who := memory.DisplayWho(line)
 	if !memory.NeedsTranslate(body) {
+		debugLog("queue chat speaker=%q body=%q", who, body)
+		if sink != nil {
+			sink.Push(who, body)
+			sink.Show()
+		}
 		return
 	}
-	debugLog("queue ko speaker=%q body=%q", memory.DisplaySpeaker(line), body)
-	job := translateJob{speaker: memory.DisplaySpeaker(line), body: body}
+	debugLog("queue ko speaker=%q body=%q", who, body)
+	job := translateJob{speaker: who, body: body}
 	select {
 	case m.jobs <- job:
 	default:
@@ -368,15 +374,18 @@ func (m *Monitor) RunTranslators(n int, stop <-chan struct{}, sink Sink) {
 					return
 				case job := <-m.jobs:
 					zh, err := m.Trans.Translate(job.body, "auto", "zh")
+					if sink == nil {
+						continue
+					}
 					if err != nil || zh == "" || looksLikeFailure(zh) {
 						debugLog("ko→zh fail speaker=%q body=%q err=%v dst=%q", job.speaker, job.body, err, zh)
 						dlog.Errorf("翻译失败")
+						sink.Push(job.speaker, job.body)
+						sink.Show()
 						continue
 					}
-					if sink != nil {
-						sink.Push(job.speaker, zh)
-						sink.Show()
-					}
+					sink.Push(job.speaker, zh)
+					sink.Show()
 				}
 			}
 		}()
