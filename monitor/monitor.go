@@ -27,7 +27,7 @@ type buffer struct {
 	fail   int
 	hangul bool
 	draft  bool
-	primed bool
+	known  map[string]struct{}
 }
 
 type translateJob struct {
@@ -84,7 +84,7 @@ func (s *seenSet) Add(x string) bool {
 	}
 	s.m[x] = struct{}{}
 	s.q = append(s.q, x)
-	if len(s.q) > 120 {
+	if len(s.q) > 400 {
 		old := s.q[0]
 		s.q = s.q[1:]
 		delete(s.m, old)
@@ -290,13 +290,8 @@ func (m *Monitor) Tick(sink Sink) {
 			bufs[i].hangul = true
 		}
 		changed = true
-		if !bufs[i].primed {
-			if n := m.seedSeen(raw); n > 0 {
-				bufs[i].primed = true
-			}
-			continue
-		}
-		m.emit(raw, lastMine, probes, sink)
+		m.emitNew(raw, bufs[i].known, lastMine, probes, sink)
+		bufs[i].known = snapshotBodies(raw)
 	}
 
 	if !changed {
@@ -313,7 +308,9 @@ func (m *Monitor) Tick(sink Sink) {
 		if u, ok := byKey[fmt.Sprintf("%s:%x", b.enc, b.addr)]; ok {
 			b.last, b.fail = u.last, u.fail
 			b.hangul = b.hangul || u.hangul
-			b.primed = b.primed || u.primed
+			if u.known != nil {
+				b.known = u.known
+			}
 		}
 		if b.fail < 3 {
 			alive = append(alive, b)
@@ -322,20 +319,24 @@ func (m *Monitor) Tick(sink Sink) {
 	m.buffers = alive
 }
 
-func (m *Monitor) seedSeen(raw string) int {
-	n := 0
+func snapshotBodies(raw string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, line := range memory.ChatCandidates(raw) {
+		if line.Text != "" {
+			out[line.Text] = struct{}{}
+		}
+	}
+	return out
+}
+
+func (m *Monitor) emitNew(raw string, known map[string]struct{}, lastMine string, probes map[string]struct{}, sink Sink) {
 	for _, line := range memory.ChatCandidates(raw) {
 		if line.Text == "" {
 			continue
 		}
-		m.seen.Add(line.Text)
-		n++
-	}
-	return n
-}
-
-func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Sink) {
-	for _, line := range memory.ChatCandidates(raw) {
+		if _, ok := known[line.Text]; ok {
+			continue
+		}
 		m.emitLine(line, lastMine, probes, sink)
 	}
 }
