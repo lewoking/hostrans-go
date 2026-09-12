@@ -27,6 +27,7 @@ type buffer struct {
 	fail   int
 	hangul bool
 	draft  bool
+	primed bool
 }
 
 type translateJob struct {
@@ -289,6 +290,12 @@ func (m *Monitor) Tick(sink Sink) {
 			bufs[i].hangul = true
 		}
 		changed = true
+		if !bufs[i].primed {
+			if n := m.seedSeen(raw); n > 0 {
+				bufs[i].primed = true
+			}
+			continue
+		}
 		m.emit(raw, lastMine, probes, sink)
 	}
 
@@ -306,12 +313,25 @@ func (m *Monitor) Tick(sink Sink) {
 		if u, ok := byKey[fmt.Sprintf("%s:%x", b.enc, b.addr)]; ok {
 			b.last, b.fail = u.last, u.fail
 			b.hangul = b.hangul || u.hangul
+			b.primed = b.primed || u.primed
 		}
 		if b.fail < 3 {
 			alive = append(alive, b)
 		}
 	}
 	m.buffers = alive
+}
+
+func (m *Monitor) seedSeen(raw string) int {
+	n := 0
+	for _, line := range memory.ChatCandidates(raw) {
+		if line.Text == "" {
+			continue
+		}
+		m.seen.Add(line.Text)
+		n++
+	}
+	return n
 }
 
 func (m *Monitor) emit(raw, lastMine string, probes map[string]struct{}, sink Sink) {
