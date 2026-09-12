@@ -772,7 +772,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 
 	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
-	alertBlack := rgb(0, 0, 0)
+	alertYellow := rgb(255, 210, 0)
 	drawLine(o.fontHint, winW-28, 8, 20, chatWhite, "×")
 
 	y := int32(padTop)
@@ -788,7 +788,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 		}
 		nameCol, bodyCol := teamBlue, chatWhite
 		if row.alert {
-			nameCol, bodyCol = alertBlack, alertBlack
+			nameCol, bodyCol = alertYellow, alertYellow
 		}
 		lineH := row.lineH
 		if lineH < 1 {
