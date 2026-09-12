@@ -189,6 +189,7 @@ var (
 	procReleaseDC                  = user32.NewProc("ReleaseDC")
 	procSetTimer                   = user32.NewProc("SetTimer")
 	procKillTimer                  = user32.NewProc("KillTimer")
+	procGetTextExtentPoint32W      = gdi32.NewProc("GetTextExtentPoint32W")
 
 	wndProcCB = syscall.NewCallback(wndProc)
 	active    *Overlay
@@ -528,29 +529,68 @@ func (o *Overlay) onIdleTimer(hwnd uintptr) {
 }
 
 type layoutRow struct {
-	text  string
-	h     int32
-	minH  int32
-	alert bool
-	font  uintptr
+	who    string
+	whoW   int32
+	body   []string
+	indent int32
+	lineH  int32
+	h      int32
+	alert  bool
+	font   uintptr
 }
 
-func measureTextH(hdc, font uintptr, w, minH int32, s string) int32 {
+type gdiSize struct{ cx, cy int32 }
+
+func textSize(hdc, font uintptr, s string) (w, h int32) {
 	if s == "" {
-		return 0
+		return 0, 0
 	}
 	if font != 0 {
 		procSelectObject.Call(hdc, font)
 	}
-	r := rect{Right: w, Bottom: 8}
 	u, _ := windows.UTF16FromString(s)
-	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-		uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
-	h := r.Bottom - r.Top
-	if h < minH {
-		h = minH
+	n := len(u) - 1
+	if n <= 0 {
+		return 0, 0
 	}
-	return h
+	var sz gdiSize
+	procGetTextExtentPoint32W.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(n), uintptr(unsafe.Pointer(&sz)))
+	return sz.cx, sz.cy
+}
+
+func wrapPrefix(hdc, font uintptr, s string, maxW int32) (line, rest string) {
+	rs := []rune(s)
+	if len(rs) == 0 {
+		return "", ""
+	}
+	if maxW < 8 {
+		maxW = 8
+	}
+	lo, hi, fit := 1, len(rs), 1
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		w, _ := textSize(hdc, font, string(rs[:mid]))
+		if w <= maxW {
+			fit = mid
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return string(rs[:fit]), string(rs[fit:])
+}
+
+func wrapAll(hdc, font uintptr, s string, maxW int32) []string {
+	var out []string
+	for s != "" {
+		line, rest := wrapPrefix(hdc, font, s, maxW)
+		if line == "" {
+			break
+		}
+		out = append(out, line)
+		s = rest
+	}
+	return out
 }
 
 func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH, gap, needed int32) {
@@ -594,13 +634,43 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 		if who != "" {
 			who += "："
 		}
-		full := who + ln.Text
-		textW := int32(winW - 28)
-		h := measureTextH(hdc, rowFont, textW, rowMinH, full)
-		if h < rowMinH {
-			h = rowMinH
+		contentW := int32(winW - 28)
+		_, emH := textSize(hdc, rowFont, "汉")
+		if emH < rowMinH {
+			emH = rowMinH
 		}
-		rows = append(rows, layoutRow{text: full, h: h, minH: rowMinH, alert: ln.Alert, font: rowFont})
+		indent, _ := textSize(hdc, rowFont, "的的")
+		whoW, _ := textSize(hdc, rowFont, who)
+		var body []string
+		if ln.Text == "" {
+			body = nil
+		} else {
+			firstW := contentW - whoW
+			if who == "" {
+				firstW = contentW
+			}
+			if firstW < 24 {
+				body = wrapAll(hdc, rowFont, ln.Text, contentW-indent)
+			} else {
+				first, rest := wrapPrefix(hdc, rowFont, ln.Text, firstW)
+				body = []string{first}
+				if rest != "" {
+					body = append(body, wrapAll(hdc, rowFont, rest, contentW-indent)...)
+				}
+			}
+		}
+		nline := int32(len(body))
+		if nline < 1 {
+			nline = 1
+		}
+		if who != "" && whoW > contentW-24 {
+			nline = int32(1 + len(body))
+			if nline < 1 {
+				nline = 1
+			}
+		}
+		h := emH * nline
+		rows = append(rows, layoutRow{who: who, whoW: whoW, body: body, indent: indent, lineH: emH, h: h, alert: ln.Alert, font: rowFont})
 		if len(rows) >= maxChat {
 			break
 		}
@@ -674,35 +744,28 @@ func (o *Overlay) paint(hwnd uintptr) {
 	procDeleteObject.Call(brush)
 	procSetBkMode.Call(hdc, transparent)
 
-	draw := func(font uintptr, x, y, w, minH int32, color uint32, s string) int32 {
+	drawLine := func(font uintptr, x, y, w int32, color uint32, s string) {
 		if s == "" {
-			return 0
+			return
 		}
 		if font != 0 {
 			procSelectObject.Call(hdc, font)
 		}
 		procSetTextColor.Call(hdc, uintptr(color))
-		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + 400}
+		r := rect{Left: x, Top: y, Right: x + w, Bottom: y + 80}
 		u, _ := windows.UTF16FromString(s)
-		calc := r
 		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&calc)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
-		h := calc.Bottom - calc.Top
-		if h < minH {
-			h = minH
-		}
-		r.Bottom = r.Top + h
-		procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-			uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix)
-		return h
+			uintptr(unsafe.Pointer(&r)), dtLeft|dtSingleLine|dtNoPrefix)
 	}
 
+	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
-	alertGray := rgb(0, 0, 0)
-	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
+	alertBlack := rgb(0, 0, 0)
+	drawLine(o.fontHint, winW-28, 8, 20, chatWhite, "×")
 
 	y := int32(padTop)
 	maxY := rc.Bottom - int32(padBot)
+	contentW := int32(winW - 28)
 	for _, row := range rows {
 		if y >= maxY {
 			break
@@ -711,15 +774,53 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if rowFont == 0 {
 			rowFont = font
 		}
-		col := chatWhite
+		nameCol, bodyCol := teamBlue, chatWhite
 		if row.alert {
-			col = alertGray
+			nameCol, bodyCol = alertBlack, alertBlack
 		}
-		floor := row.minH
-		if floor == 0 {
-			floor = minH
+		lineH := row.lineH
+		if lineH < 1 {
+			lineH = minH
 		}
-		h := draw(rowFont, 14, y, winW-28, floor, col, row.text)
-		y += h + gap
+		drawLine(rowFont, 14, y, row.whoW+2, nameCol, row.who)
+		ownLine := row.who != "" && row.whoW > contentW-24
+		if ownLine {
+			y += lineH
+			for _, part := range row.body {
+				if y >= maxY {
+					break
+				}
+				restW := contentW - row.indent
+				if restW < 8 {
+					restW = 8
+				}
+				drawLine(rowFont, 14+row.indent, y, restW, bodyCol, part)
+				y += lineH
+			}
+		} else {
+			if len(row.body) > 0 {
+				firstW := contentW - row.whoW
+				if row.who == "" {
+					firstW = contentW
+				}
+				if firstW < 8 {
+					firstW = 8
+				}
+				drawLine(rowFont, 14+row.whoW, y, firstW, bodyCol, row.body[0])
+			}
+			y += lineH
+			for i := 1; i < len(row.body); i++ {
+				if y >= maxY {
+					break
+				}
+				restW := contentW - row.indent
+				if restW < 8 {
+					restW = 8
+				}
+				drawLine(rowFont, 14+row.indent, y, restW, bodyCol, row.body[i])
+				y += lineH
+			}
+		}
+		y += gap
 	}
 }
