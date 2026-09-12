@@ -1,4 +1,4 @@
-<img width="1216" height="833" alt="image" src="https://github.com/user-attachments/assets/c1b5ba47-7b29-48ab-bd50-48a23542ff85" /># HOSTrans
+# HOSTrans
 
 风暴英雄韩服聊天翻译 · **开箱即用 · 单文件**
 
