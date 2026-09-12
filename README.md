@@ -1,4 +1,4 @@
-# HOSTrans
+<img width="1216" height="833" alt="image" src="https://github.com/user-attachments/assets/c1b5ba47-7b29-48ab-bd50-48a23542ff85" /># HOSTrans
 
 风暴英雄韩服聊天翻译 · **开箱即用 · 单文件**
 
@@ -20,4 +20,6 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 有中文时 Ctrl+P：中译英并发送
 - 悬浮窗显示韩语发言的中文译文 （别忘了设置游戏窗口全屏模式）。
 - 30 秒无新译文后字体缩为 1/3，新句或显示窗口时恢复
+
+效果图：<img width="1216" height="833" alt="image" src="https://github.com/user-attachments/assets/963e0ed1-3a39-4470-b808-a34d91d2547e" />
 
