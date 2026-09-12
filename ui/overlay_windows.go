@@ -232,6 +232,29 @@ func (o *Overlay) Push(speaker, text string) {
 	o.armIdle()
 }
 
+func (o *Overlay) Replace(speaker, from, to string) {
+	if to == "" || to == from {
+		return
+	}
+	o.mu.Lock()
+	for i := len(o.lines) - 1; i >= 0; i-- {
+		if o.lines[i].Alert {
+			continue
+		}
+		if o.lines[i].Speaker == speaker && o.lines[i].Text == from {
+			o.lines[i].Text = to
+			o.idle = false
+			o.lastActive = time.Now()
+			o.mu.Unlock()
+			o.redraw()
+			o.armIdle()
+			return
+		}
+	}
+	o.mu.Unlock()
+	o.Push(speaker, to)
+}
+
 func (o *Overlay) Status(msg string) {
 	// 路径/版本/状态不进悬浮窗
 }

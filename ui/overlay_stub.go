@@ -29,6 +29,23 @@ func (o *Overlay) Push(speaker, text string) {
 	fmt.Printf("%s：%s\n", speaker, text)
 }
 
+func (o *Overlay) Replace(speaker, from, to string) {
+	if to == "" || to == from {
+		return
+	}
+	o.mu.Lock()
+	for i := len(o.lines) - 1; i >= 0; i-- {
+		if o.lines[i].Speaker == speaker && o.lines[i].Text == from {
+			o.lines[i].Text = to
+			o.mu.Unlock()
+			fmt.Printf("%s：%s\n", speaker, to)
+			return
+		}
+	}
+	o.mu.Unlock()
+	o.Push(speaker, to)
+}
+
 func (o *Overlay) Status(msg string) {
 	fmt.Println("[状态]", msg)
 }
