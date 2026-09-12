@@ -45,7 +45,21 @@ func stripTags(s string) string {
 	s = colorTagRe.ReplaceAllString(s, "")
 	s = anyTagRe.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "\x00", "")
+	s = unescapeChat(s)
 	return strings.TrimSpace(s)
+}
+
+func unescapeChat(s string) string {
+	r := strings.NewReplacer(
+		"&apos;", "'",
+		"&#39;", "'",
+		"&quot;", `"`,
+		"&nbsp;", " ",
+		"&lt;", "<",
+		"&gt;", ">",
+		"&amp;", "&",
+	)
+	return r.Replace(s)
 }
 
 // ParseChatLine 转码剥标签后，正则只拆干净的 频道]名字:内容。

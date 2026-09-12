@@ -4,6 +4,7 @@ package ui
 
 import (
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -577,7 +578,18 @@ func wrapPrefix(hdc, font uintptr, s string, maxW int32) (line, rest string) {
 			hi = mid - 1
 		}
 	}
+	if fit < len(rs) && fit > 1 && isLatinLetter(rs[fit-1]) && isLatinLetter(rs[fit]) {
+		for i := fit - 1; i > 0; i-- {
+			if rs[i] == ' ' || rs[i] == '	' {
+				return strings.TrimRight(string(rs[:i]), " "), strings.TrimLeft(string(rs[i:]), " ")
+			}
+		}
+	}
 	return string(rs[:fit]), string(rs[fit:])
+}
+
+func isLatinLetter(r rune) bool {
+	return r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z'
 }
 
 func wrapAll(hdc, font uintptr, s string, maxW int32) []string {
