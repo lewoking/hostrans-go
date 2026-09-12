@@ -526,25 +526,11 @@ func (o *Overlay) onIdleTimer(hwnd uintptr) {
 }
 
 type layoutRow struct {
-	who, text string
-	ww, h     int32
-	minH      int32
-	alert     bool
-	font      uintptr
-}
-
-func measureTextW(hdc, font uintptr, s string) int32 {
-	if s == "" {
-		return 0
-	}
-	if font != 0 {
-		procSelectObject.Call(hdc, font)
-	}
-	r := rect{Right: winW, Bottom: 40}
-	u, _ := windows.UTF16FromString(s)
-	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)-1),
-		uintptr(unsafe.Pointer(&r)), dtLeft|dtNoPrefix|dtCalcRect|dtSingleLine)
-	return r.Right - r.Left
+	text  string
+	h     int32
+	minH  int32
+	alert bool
+	font  uintptr
 }
 
 func measureTextH(hdc, font uintptr, w, minH int32, s string) int32 {
@@ -606,20 +592,13 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 		if who != "" {
 			who += "："
 		}
-		ww := measureTextW(hdc, rowFont, who)
-		if ww > winW-80 {
-			ww = winW - 80
-		}
-		h1 := measureTextH(hdc, rowFont, ww+2, rowMinH, who)
-		h2 := measureTextH(hdc, rowFont, winW-28-ww, rowMinH, ln.Text)
-		h := h1
-		if h2 > h {
-			h = h2
-		}
+		full := who + ln.Text
+		textW := int32(winW - 28)
+		h := measureTextH(hdc, rowFont, textW, rowMinH, full)
 		if h < rowMinH {
 			h = rowMinH
 		}
-		rows = append(rows, layoutRow{who: who, text: ln.Text, ww: ww, h: h, minH: rowMinH, alert: ln.Alert, font: rowFont})
+		rows = append(rows, layoutRow{text: full, h: h, minH: rowMinH, alert: ln.Alert, font: rowFont})
 		if len(rows) >= maxChat {
 			break
 		}
@@ -716,7 +695,6 @@ func (o *Overlay) paint(hwnd uintptr) {
 		return h
 	}
 
-	teamBlue := rgb(0x31, 0x84, 0xFF)
 	chatWhite := rgb(255, 255, 255)
 	alertGray := rgb(150, 150, 150)
 	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
@@ -731,20 +709,15 @@ func (o *Overlay) paint(hwnd uintptr) {
 		if rowFont == 0 {
 			rowFont = font
 		}
-		whoColor, textColor := teamBlue, chatWhite
+		col := chatWhite
 		if row.alert {
-			whoColor, textColor = alertGray, alertGray
+			col = alertGray
 		}
 		floor := row.minH
 		if floor == 0 {
 			floor = minH
 		}
-		h1 := draw(rowFont, 14, y, row.ww+2, floor, whoColor, row.who)
-		h2 := draw(rowFont, 14+row.ww, y, winW-28-row.ww, floor, textColor, row.text)
-		h := h1
-		if h2 > h {
-			h = h2
-		}
+		h := draw(rowFont, 14, y, winW-28, floor, col, row.text)
 		y += h + gap
 	}
 }
