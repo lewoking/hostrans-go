@@ -61,8 +61,10 @@ const (
 	dtCalcRect     = 0x0400
 	dtSingleLine   = 0x0020
 	transparent    = 1
-	fwNormal       = 400
-	defaultChar    = 1
+	fwNormal        = 400
+	defaultChar     = 1
+	outTTPrecis     = 4
+	antiAliasedQual = 4
 	idcArrow       = 32512
 	idiApplication = 32512
 	colorWindow    = 5
@@ -343,23 +345,23 @@ func (o *Overlay) Run() error {
 	procSetLayeredWindowAttributes.Call(hwnd, chromaKey, 255, lwaColorkey)
 	procSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpShowWindow)
 
-	face, _ := windows.UTF16PtrFromString("Microsoft YaHei UI")
+	face, _ := windows.UTF16PtrFromString("Microsoft YaHei")
 	o.fontChat, _, _ = procCreateFontW.Call(
 		fontHeight(chatFontPx),
 		0, 0, 0, fwNormal, 0, 0, 0,
-		defaultChar, 0, 0, 0, 0,
+		defaultChar, outTTPrecis, 0, antiAliasedQual, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
 	o.fontChatIdle, _, _ = procCreateFontW.Call(
 		fontHeight(chatFontPx/idleFontDiv),
 		0, 0, 0, fwNormal, 0, 0, 0,
-		defaultChar, 0, 0, 0, 0,
+		defaultChar, outTTPrecis, 0, antiAliasedQual, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
 	o.fontHint, _, _ = procCreateFontW.Call(
 		fontHeight(hintFontPx),
 		0, 0, 0, fwNormal, 0, 0, 0,
-		defaultChar, 0, 0, 0, 0,
+		defaultChar, outTTPrecis, 0, antiAliasedQual, 0,
 		uintptr(unsafe.Pointer(face)),
 	)
 
