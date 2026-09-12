@@ -696,7 +696,7 @@ func (o *Overlay) paint(hwnd uintptr) {
 	}
 
 	chatWhite := rgb(255, 255, 255)
-	alertGray := rgb(150, 150, 150)
+	alertGray := rgb(0, 0, 0)
 	draw(o.fontHint, winW-28, 8, 20, 14, chatWhite, "×")
 
 	y := int32(padTop)
