@@ -12,7 +12,7 @@ import (
 var chatMarkers = []string{
 	`队伍]`,
 	`房间]`,
-	`团队]`,
+	`征召团队]`,
 }
 
 func clipLog(s string) string {
