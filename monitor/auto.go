@@ -9,10 +9,20 @@ import (
 	"hostrans/memory"
 )
 
+// chatMarkers 覆盖大厅、组队、征召选人和所有对局内频道；玩法模式不影响聊天格式。
 var chatMarkers = []string{
+	`团队]`,
 	`队伍]`,
 	`房间]`,
 	`征召团队]`,
+	`征召队伍]`,
+	`所有人]`,
+	`综合]`,
+	`组队]`,
+	`팀]`,
+	`전체]`,
+	`귓속말]`,
+	`일반]`,
 }
 
 func clipLog(s string) string {
@@ -49,6 +59,9 @@ func (m *Monitor) AttachIfNeeded() error {
 	old := m.Proc
 	m.Proc = proc
 	m.buffers = nil
+	m.baselineReady = false
+	m.seen = newSeen()
+	m.lastMine = ""
 	m.mu.Unlock()
 	if old != nil {
 		old.Close()
@@ -163,6 +176,7 @@ func (m *Monitor) scanChatMarkers(log func(string)) error {
 		debugLog("passive locate: no chat markers patterns=%d rawHits=%d", len(patterns), hitTotal)
 		return fmt.Errorf("未找到聊天控件")
 	}
+	// 首轮 Tick 完成后才允许未知正文上窗。扫描到地址不代表已读完其历史内容。
 	if log != nil && added > 0 {
 		log(fmt.Sprintf("定位 +%d", added))
 	}

@@ -10,10 +10,10 @@ import (
 var (
 	colorTagRe = regexp.MustCompile(`(?i)</?c\b[^>]*>`)
 	anyTagRe   = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
-	hangulRe = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
+	hangulRe   = regexp.MustCompile(`[\x{AC00}-\x{D7AF}\x{1100}-\x{11FF}\x{3130}-\x{318F}]`)
 	// 剥标签后只认两种：频道]名字:正文  或  频道]:正文。不含 <>% 。
-	chatNamedRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*([^<>%\[\]【】\n:：]{1,24})\s*[:：]\s*([^<>%\n]+)$`)
-	chatPlainRe = regexp.MustCompile(`^[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*[:：]\s*([^<>%\n]+)$`)
+	chatNamedRe = regexp.MustCompile(`(?m)[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*([^<>%\[\]【】\r\n:：]{1,24})\s*[:：]\s*([^<>%\r\n]+)`)
+	chatPlainRe = regexp.MustCompile(`(?m)[\[【]?(征召团队|征召队伍|团队|房间|队伍|组队|所有人|综合|팀|전체)[\]】]\s*[:：]\s*([^<>%\r\n]+)`)
 )
 
 var uiNoise = []string{
@@ -62,29 +62,33 @@ func unescapeChat(s string) string {
 	return r.Replace(s)
 }
 
-// ParseChatLine 转码剥标签后，正则只拆干净的 频道]名字:内容。
+func trimAtNextChannel(body string) string {
+	// 一个游戏字符串字段可能串有多条记录；正文只能到下一条频道记录开始处。
+	for _, channel := range []string{"征召团队]", "征召队伍]", "所有人]", "귓속말]", "团队]", "队伍]", "房间]", "综合]", "组队]", "전체]", "팀]", "일반]"} {
+		if i := strings.Index(body, channel); i >= 0 {
+			body = body[:i]
+		}
+	}
+	return strings.TrimSpace(body)
+}
+
+// ParseChatLine 从一段文本中提取第一条完整聊天。只返回正则的正文捕获组，
+// 绝不能把紧邻聊天记录的内存内容作为待翻译文本。
 func ParseChatLine(raw string) ChatLine {
 	line := ChatLine{Raw: raw}
 	s := stripTags(raw)
 	if s == "" {
 		return line
 	}
-	if i := strings.LastIndexAny(s, "\r\n"); i >= 0 {
-		rest := strings.TrimSpace(s[i+1:])
-		if rest != "" {
-			s = rest
-		}
-	}
 	if m := chatNamedRe.FindStringSubmatch(s); m != nil {
 		line.Channel = m[1]
 		line.Speaker = strings.TrimSpace(m[2])
-		line.Text = strings.TrimSpace(m[3])
+		line.Text = trimAtNextChannel(strings.TrimSpace(m[3]))
 		return line
 	}
 	if m := chatPlainRe.FindStringSubmatch(s); m != nil {
 		line.Channel = m[1]
-		line.Text = strings.TrimSpace(m[2])
-		return line
+		line.Text = trimAtNextChannel(strings.TrimSpace(m[2]))
 	}
 	return line
 }

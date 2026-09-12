@@ -25,10 +25,11 @@ type buffer struct {
 	addr   uintptr
 	enc    string
 	last   string
+	known  map[string]struct{}
+	primed bool
 	fail   int
 	hangul bool
 	draft  bool
-	known  map[string]struct{}
 }
 
 type translateJob struct {
@@ -39,15 +40,16 @@ type translateJob struct {
 type Monitor struct {
 	Trans *translator.Manager
 
-	mu        sync.Mutex
-	Proc      *memory.Process
-	buffers   []buffer
-	probes    map[string]struct{}
-	lastMine  string
-	lastProbe time.Time
-	seen      *seenSet
-	locating  int32
-	jobs      chan translateJob
+	mu            sync.Mutex
+	Proc          *memory.Process
+	buffers       []buffer
+	probes        map[string]struct{}
+	lastMine      string
+	lastProbe     time.Time
+	seen          *seenSet
+	locating      int32
+	baselineReady bool
+	jobs          chan translateJob
 }
 
 type seenSet struct {
@@ -123,6 +125,9 @@ func (m *Monitor) addBuffer(enc string, addr uintptr) bool {
 func (m *Monitor) insertBuffer(nb buffer) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// 命中的是渲染缓存中的字符串地址，而不是带时间戳或消息 ID 的聊天对象。
+	// 新地址需要在 Tick 中结合全局历史正文集合判断，不能仅凭地址决定新旧。
+	nb.primed = false
 	for i, b := range m.buffers {
 		if b.addr == nb.addr && b.enc == nb.enc {
 			if nb.hangul {
@@ -258,6 +263,7 @@ func (m *Monitor) Tick(sink Sink) {
 	for k, v := range m.probes {
 		probes[k] = v
 	}
+	baselineReady := m.baselineReady
 	m.mu.Unlock()
 	if len(bufs) == 0 {
 		return
@@ -272,16 +278,27 @@ func (m *Monitor) Tick(sink Sink) {
 			continue
 		}
 		bufs[i].fail = 0
-		// 多读一段，同一页里新冒出来的韩文也能抓到，不必等下一轮全堆扫描
-		if win, werr := p.ReadMemory(bufs[i].addr, 2048); werr == nil && len(win) > 0 {
-			chunk := win
-			const back = 256
-			if bufs[i].addr > back {
-				if pre, perr := p.ReadMemory(bufs[i].addr-back, back); perr == nil && len(pre) > 0 {
-					chunk = append(pre, win...)
+		// addr 是聊天字符串内的命中位置，不是聊天结构的起始地址。
+		// ReadString 已按该字符串编码读到 NUL 终止符；不得拼接邻近游戏内存，
+		// 否则会把 UI、旧消息或对象字段误作为聊天正文发给翻译服务。
+		if !bufs[i].primed {
+			// 聊天字符串没有时间戳或消息 ID。首轮扫描只把所有正文加入
+			// 本次 EXE 运行期的内存缓存，不上窗；之后新地址里的未知正文
+			// 才作为实时消息立即处理。
+			if baselineReady {
+				m.emitNew(raw, nil, lastMine, probes, sink)
+			} else {
+				for _, line := range memory.ChatCandidates(raw) {
+					if line.Text != "" {
+						m.seen.Add(line.Text)
+					}
 				}
 			}
-			raw = memory.WindowToString(chunk, bufs[i].enc)
+			bufs[i].last = raw
+			bufs[i].known = snapshotBodies(raw)
+			bufs[i].primed = true
+			changed = true
+			continue
 		}
 		if raw == "" || raw == bufs[i].last {
 			continue
@@ -296,9 +313,18 @@ func (m *Monitor) Tick(sink Sink) {
 	}
 
 	if !changed {
+		m.mu.Lock()
+		if !m.baselineReady && len(bufs) > 0 {
+			m.baselineReady = true
+		}
+		m.mu.Unlock()
 		return
 	}
 	m.mu.Lock()
+	if !m.baselineReady {
+		// seen 中保存启动时可见的历史正文；完全只在内存中，EXE 退出即清空。
+		m.baselineReady = true
+	}
 	defer m.mu.Unlock()
 	byKey := make(map[string]buffer, len(bufs))
 	for _, b := range bufs {
@@ -307,7 +333,7 @@ func (m *Monitor) Tick(sink Sink) {
 	alive := m.buffers[:0]
 	for _, b := range m.buffers {
 		if u, ok := byKey[fmt.Sprintf("%s:%x", b.enc, b.addr)]; ok {
-			b.last, b.fail = u.last, u.fail
+			b.last, b.fail, b.primed = u.last, u.fail, u.primed
 			b.hangul = b.hangul || u.hangul
 			if u.known != nil {
 				b.known = u.known
@@ -453,10 +479,11 @@ func (m *Monitor) TranslateInput(sink Sink) {
 	}
 	src = trimChat(src)
 	kind := memory.ClassifyInput(src)
-	debugLog("input capture src=%q kind=%v err=%v", src, kind, err)
+	dlog.Infof("input capture src=%q kind=%v err=%v", src, kind, err)
 	switch kind {
 	case memory.InputEmpty, memory.InputOther:
 		if err := m.Locate(nil); err != nil {
+			dlog.Infof("manual locate: %v", err)
 			debugLog("manual locate: %v", err)
 			dlog.Errorf("初始化失败")
 		}
@@ -464,10 +491,12 @@ func (m *Monitor) TranslateInput(sink Sink) {
 	case memory.InputKorean:
 		zh, err := m.Trans.Translate(src, "ko", "zh")
 		if err != nil || zh == "" || looksLikeFailure(zh) {
+			dlog.Infof("ko→zh input fail src=%q err=%v dst=%q", src, err, zh)
 			debugLog("ko→zh input fail src=%q err=%v dst=%q", src, err, zh)
 			dlog.Errorf("韩译中失败")
 			return
 		}
+		dlog.Infof("ko→zh input src=%q dst=%q", src, zh)
 		debugLog("ko→zh input src=%q dst=%q", src, zh)
 		if sink != nil {
 			sink.Push("我", zh)
@@ -477,12 +506,15 @@ func (m *Monitor) TranslateInput(sink Sink) {
 	case memory.InputChinese:
 		dst, err := m.Trans.Translate(src, "zh", "en")
 		if err != nil || dst == "" || looksLikeFailure(dst) {
+			dlog.Infof("zh→en fail src=%q err=%v dst=%q", src, err, dst)
 			debugLog("zh→en fail src=%q err=%v dst=%q", src, err, dst)
 			dlog.Errorf("中译英失败")
 			return
 		}
+		dlog.Infof("zh→en src=%q dst=%q", src, dst)
 		debugLog("zh→en src=%q dst=%q", src, dst)
 		if err := memory.TranslateChatBox(p.PID, dst); err != nil {
+			dlog.Infof("fill-back fail: %v", err)
 			debugLog("fill-back fail: %v", err)
 			dlog.Errorf("发送失败")
 			return

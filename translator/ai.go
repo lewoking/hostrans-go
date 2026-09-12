@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hostrans/dlog"
 	"io"
 	"net/http"
 	"strings"
@@ -79,12 +80,11 @@ func langName(lang string) string {
 }
 
 func buildAIInput(text, from, to string) string {
-	dst := langName(to)
-	src := langName(from)
+	// 明确禁止解释，避免模型把翻译过程或说明写入输出，增加计费 token。
 	if from == "" || strings.EqualFold(from, "auto") {
-		return "把下面游戏聊天译成" + dst + "，只输出译文：\n" + text
+		return "auto->" + to + "\n" + text + "\nOutput translation only."
 	}
-	return "把下面" + src + "游戏聊天译成" + dst + "，只输出译文：\n" + text
+	return from + "->" + to + "\n" + text + "\nOutput translation only."
 }
 
 type responsesReq struct {
@@ -136,11 +136,14 @@ func (a *AITranslator) Translate(text, from, to string) (string, error) {
 	if a.key == "" {
 		return "", fmt.Errorf("未注入翻译密钥")
 	}
+	input := buildAIInput(text, from, to)
 	payload, err := json.Marshal(responsesReq{
 		Model:           a.model,
-		Input:           buildAIInput(text, from, to),
+		Input:           input,
 		MaxOutputTokens: 256,
 	})
+	// 仅记录实际 JSON 大小和 input；payload 不记录，避免泄露 Authorization 密钥。
+	dlog.Infof("AI request model=%q input_bytes=%d payload_bytes=%d input=%q", a.model, len(input), len(payload), input)
 	if err != nil {
 		return "", err
 	}
