@@ -21,5 +21,7 @@ Windows：[Releases](https://github.com/lewoking/hostrans-go/releases/latest) �
 - 悬浮窗显示韩语发言的中文译文 （别忘了设置游戏窗口全屏模式）。
 - 30 秒无新译文后字体缩为 1/3，新句或显示窗口时恢复
 
-效果图：<img width="1216" height="833" alt="image" src="https://github.com/user-attachments/assets/963e0ed1-3a39-4470-b808-a34d91d2547e" />
+效果图：
+<img width="1499" height="900" alt="1e00f917c8b42d60786b5fdd94a82247" src="https://github.com/user-attachments/assets/16337824-ec44-4c56-9c53-5c14823e9079" />
+
 
