@@ -16,7 +16,6 @@ import (
 type Sink interface {
 	Push(speaker, text string)
 	Replace(speaker, from, to string)
-	Status(msg string)
 	Show()
 	Stay()
 }

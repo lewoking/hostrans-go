@@ -13,7 +13,6 @@ type Overlay struct {
 	mu    sync.Mutex
 	lines []Line
 
-	OnLocate         func()
 	OnTranslateInput func()
 }
 
@@ -46,17 +45,12 @@ func (o *Overlay) Replace(speaker, from, to string) {
 	o.Push(speaker, to)
 }
 
-func (o *Overlay) Status(msg string) {
-	fmt.Println("[状态]", msg)
-}
-
 func (o *Overlay) Alert(msg string) {
 	fmt.Println("[错误]", msg)
 }
 
 func (o *Overlay) Show() {}
 func (o *Overlay) Stay() {}
-func (o *Overlay) Hide() {}
 
 func (o *Overlay) Run() error {
 	fmt.Println("当前系统无法显示 Win32 悬浮窗。按 Enter 返回。")

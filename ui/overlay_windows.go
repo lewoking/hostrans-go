@@ -23,7 +23,6 @@ const (
 	lwaColorkey   = 0x00000001
 	chromaKey     = 0x00FF00FF // 品红，用作透明色键
 	swShow        = 5
-	swHide        = 0
 	hwndTopmost   = ^uintptr(0) // HWND_TOPMOST = -1
 	swpNoMove     = 0x0002
 	swpNoSize     = 0x0001
@@ -40,9 +39,8 @@ const (
 	wmClose      = 0x0010
 	wmApp        = 0x8000
 	wmAppRedraw  = wmApp + 1
-	wmAppHide    = wmApp + 2
-	wmAppShow    = wmApp + 3
-	wmAppIdleArm = wmApp + 4
+	wmAppShow    = wmApp + 2
+	wmAppIdleArm = wmApp + 3
 	wmTimer      = 0x0113
 
 	idleTimerID = 1
@@ -56,19 +54,18 @@ const (
 	vkTab       = 0x09
 	vkP         = 0x50
 
-	dtLeft         = 0x0000
-	dtWordBreak    = 0x0010
-	dtNoPrefix     = 0x0800
-	dtCalcRect     = 0x0400
-	dtSingleLine   = 0x0020
-	transparent    = 1
+	dtLeft          = 0x0000
+	dtWordBreak     = 0x0010
+	dtNoPrefix      = 0x0800
+	dtCalcRect      = 0x0400
+	dtSingleLine    = 0x0020
+	transparent     = 1
 	fwNormal        = 400
 	defaultChar     = 1
 	outTTPrecis     = 4
 	antiAliasedQual = 4
-	idcArrow       = 32512
-	idiApplication = 32512
-	colorWindow    = 5
+	idcArrow        = 32512
+	idiApplication  = 32512
 
 	hotShow    = 2
 	hotTransIn = 3
@@ -139,11 +136,9 @@ type Overlay struct {
 
 	mu         sync.Mutex
 	lines      []Line
-	visible    bool
 	idle       bool
 	lastActive time.Time
 
-	OnLocate         func()
 	OnTranslateInput func()
 }
 
@@ -160,7 +155,6 @@ var (
 	procDispatchMessageW           = user32.NewProc("DispatchMessageW")
 	procPostQuitMessage            = user32.NewProc("PostQuitMessage")
 	procShowWindow                 = user32.NewProc("ShowWindow")
-	procUpdateWindow               = user32.NewProc("UpdateWindow")
 	procInvalidateRect             = user32.NewProc("InvalidateRect")
 	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 	procSetWindowPos               = user32.NewProc("SetWindowPos")
@@ -216,7 +210,7 @@ func loadAppIcon(mod uintptr) uintptr {
 }
 
 func NewOverlay() *Overlay {
-	return &Overlay{visible: true}
+	return &Overlay{}
 }
 
 func (o *Overlay) Push(speaker, text string) {
@@ -253,10 +247,6 @@ func (o *Overlay) Replace(speaker, from, to string) {
 	}
 	o.mu.Unlock()
 	o.Push(speaker, to)
-}
-
-func (o *Overlay) Status(msg string) {
-	// 路径/版本/状态不进悬浮窗
 }
 
 func (o *Overlay) Alert(msg string) {
@@ -299,12 +289,6 @@ func (o *Overlay) Show() {
 
 func (o *Overlay) Stay() {
 	o.Show()
-}
-
-func (o *Overlay) Hide() {
-	if o.hwnd != 0 {
-		procPostMessageW.Call(o.hwnd, wmAppHide, 0, 0)
-	}
 }
 
 func (o *Overlay) Close() {
@@ -493,16 +477,7 @@ func wndProc(hwnd, msgID, wParam, lParam uintptr) uintptr {
 		}
 		procInvalidateRect.Call(hwnd, 0, 1)
 		return 0
-	case wmAppHide:
-		if o != nil {
-			o.visible = false
-		}
-		procShowWindow.Call(hwnd, swHide)
-		return 0
 	case wmAppShow:
-		if o != nil {
-			o.visible = true
-		}
 		procShowWindow.Call(hwnd, swShow)
 		procSetWindowPos.Call(hwnd, hwndTopmost, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
 		if o != nil {
@@ -650,9 +625,6 @@ func (o *Overlay) layoutRows(hdc uintptr) (rows []layoutRow, font uintptr, minH,
 	}
 
 	for _, ln := range lines {
-		if ln.Status {
-			continue
-		}
 		rowFont := font
 		rowMinH := minH
 		if ln.Alert {

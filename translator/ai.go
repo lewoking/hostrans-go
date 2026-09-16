@@ -81,19 +81,6 @@ func (a *AITranslator) Warmup() {
 	resp.Body.Close()
 }
 
-func langName(lang string) string {
-	switch strings.ToLower(lang) {
-	case "zh", "zh-cn", "zh-hans", "chinese":
-		return "简体中文"
-	case "ko", "kor", "korean":
-		return "韩语"
-	case "en", "eng", "english":
-		return "英语"
-	default:
-		return lang
-	}
-}
-
 func buildAIInput(text, from, to string) string {
 	// 明确禁止解释，避免模型把翻译过程或说明写入输出，增加计费 token。
 	if from == "" || strings.EqualFold(from, "auto") {

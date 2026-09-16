@@ -46,9 +46,6 @@ func DebugEnabled(ver string) bool {
 	}
 	s = strings.TrimPrefix(s, "v")
 	s = strings.TrimPrefix(s, "V")
-	if i := strings.IndexAny(s, ".-+"); i >= 0 {
-		// keep first number even if 0.5.3
-	}
 	parts := strings.SplitN(s, ".", 2)
 	maj, err := strconv.Atoi(parts[0])
 	if err != nil {
