@@ -18,8 +18,8 @@ if [[ -z "${HOSTTRANS_AI_KEY:-}" ]]; then
   exit 1
 fi
 
-base="${HOSTTRANS_AI_BASE:-https://hub.oaifree.com}"
-model="${HOSTTRANS_AI_MODEL:-gpt-5.6-luna}"
+base="${HOSTTRANS_AI_BASE:-https://gateway.ai.cloudflare.com/v1/64d53ca476db7004bc2b51e1d9db2dad/translation/compat}"
+model="${HOSTTRANS_AI_MODEL:-dynamic/free}"
 
 ldflags="-s -w -H windowsgui"
 ldflags+=" -X hostrans/dlog.Version=${ver}"

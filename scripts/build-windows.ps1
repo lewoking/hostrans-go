@@ -34,11 +34,11 @@ if ([string]::IsNullOrWhiteSpace($key)) {
 
 $base = $values["HOSTTRANS_AI_BASE"]
 if ([string]::IsNullOrWhiteSpace($base)) {
-    $base = "https://hub.oaifree.com"
+    $base = "https://gateway.ai.cloudflare.com/v1/64d53ca476db7004bc2b51e1d9db2dad/translation/compat"
 }
 $model = $values["HOSTTRANS_AI_MODEL"]
 if ([string]::IsNullOrWhiteSpace($model)) {
-    $model = "gpt-5.6-luna"
+    $model = "dynamic/free"
 }
 
 $ldflags = @(

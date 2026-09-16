@@ -11,11 +11,17 @@ import (
 	"time"
 )
 
-// 由 ldflags 注入，源码里保持为空。
+const (
+	defaultAIBase  = "https://gateway.ai.cloudflare.com/v1/64d53ca476db7004bc2b51e1d9db2dad/translation/compat"
+	defaultAIModel = "dynamic/free"
+	maxOutTokens   = 256
+)
+
+// 由 ldflags 注入，源码里密钥保持为空。
 var (
 	AIKey   string
-	AIBase  = "https://hub.oaifree.com"
-	AIModel = "gpt-5.6-luna"
+	AIBase  = defaultAIBase
+	AIModel = defaultAIModel
 )
 
 type AITranslator struct {
@@ -28,11 +34,11 @@ type AITranslator struct {
 func NewAITranslator() *AITranslator {
 	base := strings.TrimRight(strings.TrimSpace(AIBase), "/")
 	if base == "" {
-		base = "https://hub.oaifree.com"
+		base = defaultAIBase
 	}
 	model := strings.TrimSpace(AIModel)
 	if model == "" {
-		model = "gpt-5.6-luna"
+		model = defaultAIModel
 	}
 	return &AITranslator{
 		client: &http.Client{
@@ -49,15 +55,24 @@ func NewAITranslator() *AITranslator {
 	}
 }
 
+func (a *AITranslator) setAuth(req *http.Request) {
+	token := "Bearer " + a.key
+	if strings.Contains(a.base, "gateway.ai.cloudflare.com") {
+		req.Header.Set("cf-aig-authorization", token)
+		return
+	}
+	req.Header.Set("Authorization", token)
+}
+
 func (a *AITranslator) Warmup() {
 	if a.key == "" {
 		return
 	}
-	req, err := http.NewRequest("GET", a.base+"/v1/models", nil)
+	req, err := http.NewRequest("GET", a.base+"/models", nil)
 	if err != nil {
 		return
 	}
-	req.Header.Set("Authorization", "Bearer "+a.key)
+	a.setAuth(req)
 	resp, err := a.client.Do(req)
 	if err != nil {
 		return
@@ -87,44 +102,76 @@ func buildAIInput(text, from, to string) string {
 	return from + "->" + to + "\n" + text + "\nOutput translation only."
 }
 
-type responsesReq struct {
-	Model           string `json:"model"`
-	Input           string `json:"input"`
-	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+type thinkingOpt struct {
+	Type string `json:"type"`
 }
 
-type responsesResp struct {
+type chatReq struct {
+	Model              string         `json:"model"`
+	Messages           []chatMessage  `json:"messages"`
+	MaxTokens          int            `json:"max_tokens,omitempty"`
+	Thinking           *thinkingOpt   `json:"thinking,omitempty"`
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+}
+
+type chatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type chatResp struct {
 	Error struct {
 		Message string `json:"message"`
 	} `json:"error"`
-	Output []struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"output"`
+	Choices []struct {
+		Message struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
-func parseResponses(data []byte) (string, error) {
+func contentText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return ""
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return strings.TrimSpace(s)
+		}
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			b.WriteString(p.Text)
+		}
+		return strings.TrimSpace(b.String())
+	}
+	return ""
+}
+
+func parseChatCompletions(data []byte) (string, error) {
 	if err := rejectNonJSON(data); err != nil {
 		return "", err
 	}
-	var r responsesResp
+	var r chatResp
 	if err := json.Unmarshal(data, &r); err != nil {
 		return "", fmt.Errorf("解析失败")
 	}
 	if r.Error.Message != "" {
 		return "", fmt.Errorf("%s", r.Error.Message)
 	}
-	var b strings.Builder
-	for _, item := range r.Output {
-		for _, c := range item.Content {
-			if c.Text != "" {
-				b.WriteString(c.Text)
-			}
+	var out string
+	for _, c := range r.Choices {
+		if t := contentText(c.Message.Content); t != "" {
+			out = t
+			break
 		}
 	}
-	out := strings.TrimSpace(b.String())
 	out = strings.Trim(out, "\"“”")
 	if out == "" {
 		return "", fmt.Errorf("empty")
@@ -137,21 +184,28 @@ func (a *AITranslator) Translate(text, from, to string) (string, error) {
 		return "", fmt.Errorf("未注入翻译密钥")
 	}
 	input := buildAIInput(text, from, to)
-	payload, err := json.Marshal(responsesReq{
-		Model:           a.model,
-		Input:           input,
-		MaxOutputTokens: 256,
+	payload, err := json.Marshal(chatReq{
+		Model: a.model,
+		Messages: []chatMessage{
+			{Role: "user", Content: input},
+		},
+		MaxTokens: maxOutTokens,
+		// Gateway 路由节点没有关思考开关；Workers AI 的 GLM 默认会把 token 花在 reasoning 上，content 变 null。
+		Thinking: &thinkingOpt{Type: "disabled"},
+		ChatTemplateKwargs: map[string]any{
+			"enable_thinking": false,
+		},
 	})
-	// 仅记录实际 JSON 大小和 input；payload 不记录，避免泄露 Authorization 密钥。
+	// 仅记录实际 JSON 大小和 input；payload 不记录，避免泄露密钥。
 	dlog.Infof("AI request model=%q input_bytes=%d payload_bytes=%d input=%q", a.model, len(input), len(payload), input)
 	if err != nil {
 		return "", err
 	}
-	req, err := http.NewRequest("POST", a.base+"/v1/responses", bytes.NewReader(payload))
+	req, err := http.NewRequest("POST", a.base+"/chat/completions", bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+a.key)
+	a.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", httpUserAgent)
 	resp, err := a.client.Do(req)
@@ -160,7 +214,7 @@ func (a *AITranslator) Translate(text, from, to string) (string, error) {
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	out, err := parseResponses(data)
+	out, err := parseChatCompletions(data)
 	if resp.StatusCode != 200 {
 		if err != nil {
 			return "", fmt.Errorf("http %d: %v", resp.StatusCode, err)
