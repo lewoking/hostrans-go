@@ -83,10 +83,11 @@ func (a *AITranslator) Warmup() {
 
 func buildAIInput(text, from, to string) string {
 	// 明确禁止解释，避免模型把翻译过程或说明写入输出，增加计费 token。
+	pair := from + "->" + to
 	if from == "" || strings.EqualFold(from, "auto") {
-		return "auto->" + to + "\n" + text + "\nOutput translation only."
+		pair = "auto->" + to
 	}
-	return from + "->" + to + "\n" + text + "\nOutput translation only."
+	return "游戏内聊天\n" + pair + "\n" + text + "\nOutput translation only."
 }
 
 type thinkingOpt struct {
